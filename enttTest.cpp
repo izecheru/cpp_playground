@@ -120,37 +120,24 @@ void registerMetaComponent()
     .template func<&emplaceComponent<TComponent>>( "emplace"_hs );
 }
 
-// template <typename TEvent>
-// auto addHandler( EventDispatcher& dispatcher, const sol::function& func )
-//{
-//   auto* handleRef{ func.as<LuaEventHandler<TEvent>*>() };
-//   handleRef->connection = dispatcher.addHandler<TEvent, &LuaEventHandler<TEvent>::HandleEvent>( *handleRef );
-// }
-//
-// template <typename TEvent>
-// auto dispatch( EventDispatcher& dispatcher, const sol::table& event )
-//{
-//   dispatcher.dispatchEvent<TEvent>( event.as<TEvent>() );
-// }
-
 template <typename Event>
 auto add_handler( EventDispatcher& dispatcher, const sol::function& f )
 {
   return std::make_unique<LuaEventHandler<Event>>( dispatcher, f );
 }
 
-// template <typename TEvent>
-// void add_handler( EventDispatcher& dispatcher, const sol::table& handler /*, LuaHandler<TEvent>& handler */ )
-//{
-//   if ( !handler.valid() )
-//   {
-//     SCION_ERROR( "Failed to add new event handler. Handler was invalid." );
-//     return;
-//   }
-//
-//   auto* handleRef{ handler.as<LuaEventHandler<TEvent>*>() };
-//   handleRef->connection = dispatcher.addHandler<TEvent, &LuaEventHandler<TEvent>::handle>( *handleRef );
-// }
+template <typename Event>
+auto add_handler2( EventDispatcher& dispatcher, const sol::object& func )
+{
+  if ( !func.valid() )
+  {
+    std::cout << "invalid func\n";
+    return;
+  }
+
+  auto* funcRef{ func.as<LuaHandler<Event>*>() };
+  funcRef->connection = dispatcher.addHandler<Event, &LuaHandler<Event>::handle>( *funcRef );
+}
 
 template <typename Event>
 void dispatch_event( EventDispatcher& dispatcher, const sol::table& evt )
@@ -170,6 +157,7 @@ void registerMetaEvent()
   entt::meta_factory<TEvent>()
     .type( entt::type_hash<TEvent>::value() )
     .template func<&add_handler<TEvent>>( "add_handler"_hs )
+    .template func<&add_handler2<TEvent>>( "add_handler2"_hs )
     .template func<&has_handlers<TEvent>>( "has_handlers"_hs )
     .template func<&dispatch_event<TEvent>>( "dispatch_event"_hs );
 }
@@ -212,6 +200,11 @@ TData getField( entt::meta_any& object, const char* fieldName )
   return field.get( object ).cast<TData>();
 }
 
+struct LuaEvent
+{
+  sol::object data;
+};
+
 auto main() -> int
 {
   sol::state lua;
@@ -239,9 +232,6 @@ auto main() -> int
     "index",
     &IndexComponent::index );
 
-  registerMetaEvent<ScriptEvent>();
-  registerMetaEvent<MessageEvent>();
-
   lua.new_usertype<ScriptEvent>(
     "ScriptEvent",
     sol::call_constructor,
@@ -250,6 +240,25 @@ auto main() -> int
     &entt::type_hash<ScriptEvent>::value,
     "data",
     &ScriptEvent::data );
+
+  lua.new_usertype<LuaHandler<LuaEvent>>(
+    "LuaEventHandler",
+    "typeId",
+    entt::type_hash<LuaHandler<LuaEvent>>::value,
+    "eventType",
+    entt::type_hash<LuaEvent>::value,
+    sol::call_constructor,
+    sol::factories( []( const sol::function& func ) { return LuaHandler<LuaEvent>{ .callback = func }; } ),
+    "release",
+    &LuaHandler<LuaEvent>::release );
+
+  lua.new_usertype<LuaEvent>( "LuaEvent",
+                              "typeId",
+                              &entt::type_hash<LuaEvent>::value,
+                              sol::call_constructor,
+                              sol::factories( []( const sol::object& data ) { return LuaEvent{ .data = data }; } ),
+                              "data",
+                              &LuaEvent::data );
 
   lua.new_usertype<MessageEvent>(
     "MessageEvent",
@@ -284,12 +293,20 @@ auto main() -> int
       return false;
     },
     "addHandler",
-    []( EventDispatcher& self, const sol::object& eventTypeOrId, const sol::function& listener, sol::this_state s ) {
+    []( EventDispatcher& self, const sol::object& eventTypeOrId, const sol::object& listener, sol::this_state s ) {
       if ( !listener.valid() )
       {
         return entt::meta_any{};
       }
-      return invokeMetaFunc( deduceType( eventTypeOrId ), "add_handler"_hs, self, listener );
+      return invokeMetaFunc( getTypeId( eventTypeOrId ), "add_handler"_hs, self, listener );
+    },
+    "addHandlerExperimental",
+    []( EventDispatcher& self, const sol::object& eventTypeOrId, const sol::object& listener, sol::this_state s ) {
+      if ( !listener.valid() )
+      {
+        return entt::meta_any{};
+      }
+      return invokeMetaFunc( getTypeId( eventTypeOrId ), "add_handler2"_hs, self, listener );
     },
     "dispatchEvent",
     []( EventDispatcher& self, const sol::table& event ) {
@@ -307,22 +324,12 @@ auto main() -> int
       }
     } );
 
-  struct Test
-  {
-    Test( EventDispatcher& dispatcher )
-    {
-      dispatcher.addHandler<ScriptEvent, &Test::recieve>( *this );
-    }
+  registerMetaEvent<ScriptEvent>();
+  registerMetaEvent<MessageEvent>();
+  registerMetaEvent<LuaEvent>();
+  registerMetaEvent<LuaHandler<LuaEvent>>();
 
-    void recieve( const ScriptEvent& event )
-    {
-      std::cout << "C++ received too";
-    }
-  };
-
-  Test test{ dispatcher };
-
-  lua.safe_script_file( "H:\\Git\\enttTest\\test.lua" );
+  lua.safe_script_file( "H:\\Git\\cpp_playground\\test.lua" );
 
   return 0;
 }

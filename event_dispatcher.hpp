@@ -129,3 +129,22 @@ struct LuaEventHandler
       callback( event );
   }
 };
+
+template <typename TEvent>
+struct LuaHandler
+{
+  sol::function callback;
+  entt::connection connection;
+
+  void release()
+  {
+    connection.release();
+    callback.abandon();
+  }
+
+  void handle( const TEvent& event )
+  {
+    if ( connection && callback.valid() )
+      callback( event );
+  }
+};
