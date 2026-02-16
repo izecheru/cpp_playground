@@ -1,194 +1,56 @@
-﻿#include <cstdlib>
-#include <cstring>
-#include <algorithm>
+﻿#include <SDL2/SDL.h>
+#include <SDL2/SDL_vulkan.h>
 #include <iostream>
-#include <memory>
-#include <stdexcept>
 #include <vector>
+#include "vulkan_backend.hpp"
+#pragma clang diagnostic pop
+#include <vulkan/vulkan.hpp>
 
-#if defined( __INTELLISENSE__ ) || !defined( USE_CPP20_MODULES )
-#include <vulkan/vulkan_raii.hpp>
-#else
-import vulkan_hpp;
+#ifdef _WIN32
+// #pragma comment( linker, "/subsystem:windows" )
+#define VK_USE_PLATFORM_WIN32_KHR
+#define PLATFORM_SURFACE_EXTENSION_NAME VK_KHR_WIN32_SURFACE_EXTENSION_NAME
 #endif
 
-#define GLFW_INCLUDE_VULKAN // REQUIRED only for GLFW CreateWindowSurface.
-#include <GLFW/glfw3.h>
-
-constexpr uint32_t WIDTH = 800;
-constexpr uint32_t HEIGHT = 600;
-
-const std::vector<char const*> validationLayers = { "VK_LAYER_KHRONOS_validation" };
-
-#ifdef NDEBUG
-constexpr bool enableValidationLayers = false;
-#else
-constexpr bool enableValidationLayers = true;
+#define APP_NAME "hello-triangle"
+#define ARRAY_SIZE( a ) ( sizeof( a ) / sizeof( a[0] ) )
+#ifndef UINT32_MAX
+#define UINT32_MAX 0xffffffff
 #endif
 
-class HelloTriangleApplication
+int SDL_main( int argc, char* argv[] )
 {
-public:
-  void run()
+  if ( SDL_Init( SDL_INIT_VIDEO ) != 0 )
   {
-    initWindow();
-    initVulkan();
-    mainLoop();
-    cleanup();
+    std::cout << "failed to init sdl";
+    return 0;
   }
 
-private:
-  GLFWwindow* window = nullptr;
-
-  vk::raii::Context context;
-  vk::raii::Instance instance = nullptr;
-  vk::raii::DebugUtilsMessengerEXT debugMessenger = nullptr;
-
-  void initWindow()
+  if ( SDL_Vulkan_LoadLibrary( nullptr ) == -1 )
   {
-    glfwInit();
-
-    glfwWindowHint( GLFW_CLIENT_API, GLFW_NO_API );
-    glfwWindowHint( GLFW_RESIZABLE, GLFW_FALSE );
-
-    window = glfwCreateWindow( WIDTH, HEIGHT, "kogayonon game engine", nullptr, nullptr );
+    std::cout << "failed to load lib";
+    return 0;
   }
 
-  void initVulkan()
-  {
-    createInstance();
-    setupDebugMessenger();
-  }
+  SDL_Window* m_window = SDL_CreateWindow(
+    APP_NAME, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 640, 360, SDL_WINDOW_SHOWN | SDL_WINDOW_VULKAN );
+  VulkanBase vulkan( m_window );
 
-  void mainLoop()
+  bool running = true;
+  while ( running )
   {
-    while ( !glfwWindowShouldClose( window ) )
+    SDL_Event windowEvent;
+    while ( SDL_PollEvent( &windowEvent ) )
     {
-      glfwPollEvents();
-    }
-  }
-
-  void cleanup()
-  {
-    glfwDestroyWindow( window );
-
-    glfwTerminate();
-  }
-
-  void createInstance()
-  {
-    vk::ApplicationInfo appInfo{};
-    appInfo.pApplicationName = "kogayonon";
-    appInfo.applicationVersion = VK_MAKE_VERSION( 1, 0, 0 );
-    appInfo.pEngineName = "kogayonon";
-    appInfo.engineVersion = VK_MAKE_VERSION( 1, 0, 0 );
-    appInfo.apiVersion = vk::ApiVersion14;
-
-    // Get the required layers
-    std::vector<char const*> requiredLayers;
-    if ( enableValidationLayers )
-    {
-      requiredLayers.assign( validationLayers.begin(), validationLayers.end() );
-    }
-
-    // Check if the required layers are supported by the Vulkan implementation.
-    auto layerProperties = context.enumerateInstanceLayerProperties();
-    for ( auto const& requiredLayer : requiredLayers )
-    {
-      if ( std::ranges::none_of( layerProperties, [requiredLayer]( auto const& layerProperty ) {
-             return strcmp( layerProperty.layerName, requiredLayer ) == 0;
-           } ) )
+      switch ( windowEvent.type )
       {
-        throw std::runtime_error( "Required layer not supported: " + std::string( requiredLayer ) );
+      case SDL_QUIT:
+        running = false;
+      case SDL_KEYDOWN:
+        std::cout << windowEvent.key.keysym.scancode << '\n';
       }
     }
-
-    // Get the required extensions.
-    auto requiredExtensions = getRequiredExtensions();
-
-    // Check if the required extensions are supported by the Vulkan implementation.
-    auto extensionProperties = context.enumerateInstanceExtensionProperties();
-    for ( auto const& requiredExtension : requiredExtensions )
-    {
-      if ( std::ranges::none_of( extensionProperties, [requiredExtension]( auto const& extensionProperty ) {
-             return strcmp( extensionProperty.extensionName, requiredExtension ) == 0;
-           } ) )
-      {
-        throw std::runtime_error( "Required extension not supported: " + std::string( requiredExtension ) );
-      }
-    }
-
-    vk::InstanceCreateInfo createInfo{};
-    createInfo.pApplicationInfo = &appInfo;
-    createInfo.enabledLayerCount = static_cast<uint32_t>( requiredLayers.size() );
-    createInfo.ppEnabledLayerNames = requiredLayers.data();
-    createInfo.enabledExtensionCount = static_cast<uint32_t>( requiredExtensions.size() );
-    createInfo.ppEnabledExtensionNames = requiredExtensions.data();
-    instance = vk::raii::Instance( context, createInfo );
   }
 
-  void setupDebugMessenger()
-
-  {
-    if ( !enableValidationLayers )
-      return;
-
-    vk::DebugUtilsMessageSeverityFlagsEXT severityFlags( vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose |
-                                                         vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning |
-                                                         vk::DebugUtilsMessageSeverityFlagBitsEXT::eError );
-    vk::DebugUtilsMessageTypeFlagsEXT messageTypeFlags( vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral |
-                                                        vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance |
-                                                        vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation );
-    vk::DebugUtilsMessengerCreateInfoEXT debugUtilsMessengerCreateInfoEXT{};
-    debugUtilsMessengerCreateInfoEXT.messageSeverity = severityFlags;
-    debugUtilsMessengerCreateInfoEXT.messageType = messageTypeFlags;
-    debugUtilsMessengerCreateInfoEXT.pfnUserCallback = &debugCallback;
-
-    debugMessenger = instance.createDebugUtilsMessengerEXT( debugUtilsMessengerCreateInfoEXT );
-  }
-
-  std::vector<const char*> getRequiredExtensions()
-
-  {
-    uint32_t glfwExtensionCount = 0;
-    auto glfwExtensions = glfwGetRequiredInstanceExtensions( &glfwExtensionCount );
-
-    std::vector extensions( glfwExtensions, glfwExtensions + glfwExtensionCount );
-    if ( enableValidationLayers )
-    {
-      extensions.push_back( vk::EXTDebugUtilsExtensionName );
-    }
-
-    return extensions;
-  }
-
-  static VKAPI_ATTR vk::Bool32 VKAPI_CALL debugCallback( vk::DebugUtilsMessageSeverityFlagBitsEXT severity,
-                                                         vk::DebugUtilsMessageTypeFlagsEXT type,
-                                                         const vk::DebugUtilsMessengerCallbackDataEXT* pCallbackData,
-                                                         void* )
-  {
-    if ( severity == vk::DebugUtilsMessageSeverityFlagBitsEXT::eError ||
-         severity == vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning )
-    {
-      std::cerr << "validation layer: type " << to_string( type ) << " msg: " << pCallbackData->pMessage << std::endl;
-    }
-
-    return vk::False;
-  }
-};
-
-int main()
-{
-  try
-  {
-    HelloTriangleApplication app;
-    app.run();
-  }
-  catch ( const std::exception& e )
-  {
-    std::cerr << e.what() << std::endl;
-    return EXIT_FAILURE;
-  }
-
-  return EXIT_SUCCESS;
+  return 0;
 }
