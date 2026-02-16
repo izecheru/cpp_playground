@@ -1,148 +1,272 @@
 #pragma once
-#include <SDL2/SDL.h>
-#include <SDL2/SDL_vulkan.h>
+#include <cstdlib>
+#include <GLFW/glfw3.h>
 #include <assert.h>
 #include <iostream>
 #include <vulkan/vulkan.hpp>
 
-class VulkanBase
+const std::vector<const char*> validationLayers = { "VK_LAYER_KHRONOS_validation" };
+
+#ifdef NDEBUG
+const bool enableValidationLayers = false;
+#else
+const bool enableValidationLayers = true;
+#endif
+
+struct VkInitData
+{
+  // this is used for debugging setup
+  std::vector<VkLayerProperties> availableLayers;
+  // extensions supported
+  std::vector<VkExtensionProperties> extensionsProperties;
+
+  std::vector<const char*> extenions;
+  // we need this to enumerate all rendering capable devices
+  std::vector<VkPhysicalDevice> devices;
+
+  void fill()
+  {
+    uint32_t extensionCount = 0;
+    vkEnumerateInstanceExtensionProperties( nullptr, &extensionCount, nullptr );
+    extensionsProperties.resize( extensionCount );
+    vkEnumerateInstanceExtensionProperties( nullptr, &extensionCount, extensionsProperties.data() );
+
+    uint32_t layerCount;
+    vkEnumerateInstanceLayerProperties( &layerCount, nullptr );
+    availableLayers.resize( layerCount );
+    vkEnumerateInstanceLayerProperties( &layerCount, availableLayers.data() );
+
+    uint32_t glfwExtensionCount = 0;
+    const char** glfwExtensions;
+    glfwExtensions = glfwGetRequiredInstanceExtensions( &glfwExtensionCount );
+
+    extenions = std::vector<const char*>( glfwExtensions, glfwExtensions + glfwExtensionCount );
+
+    if ( enableValidationLayers )
+    {
+      extenions.push_back( VK_EXT_DEBUG_UTILS_EXTENSION_NAME );
+    }
+  }
+};
+
+class HelloTriangleApplication
 {
 public:
-  explicit VulkanBase( SDL_Window* wnd )
-      : m_window{ wnd }
+  void run()
   {
-    createInstance( wnd );
-
-    // create the surface
-    SDL_Vulkan_CreateSurface( wnd, m_vkInstance, &m_vkSurface );
-
-    populatePhysicalDevices();
-
-    uint32_t graphicsQueueIndex = 0;
-    uint32_t presentQueueIndex = 0;
-    VkBool32 support;
-    uint32_t i = 0;
-    for ( auto& queueFamily : m_queueFamilies )
-    {
-      if ( graphicsQueueIndex == UINT32_MAX && queueFamily.queueCount > 0 &&
-           queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT )
-      {
-        graphicsQueueIndex = i;
-      }
-
-      if ( presentQueueIndex == UINT32_MAX )
-      {
-        vkGetPhysicalDeviceSurfaceSupportKHR( m_physicalDevices.at( graphicsQueueIndex ), i, m_vkSurface, &support );
-        if ( support )
-          presentQueueIndex = i;
-      }
-      ++i;
-    }
-
-    float queuePriority = 1.0f;
-    VkDeviceQueueCreateInfo queueInfo = {
-      VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, // sType
-      nullptr,                                    // pNext
-      0,                                          // flags
-      graphicsQueueIndex,                         // graphicsQueueIndex
-      1,                                          // queueCount
-      &queuePriority,                             // pQueuePriorities
-    };
-
-    VkPhysicalDeviceFeatures deviceFeatures = {};
-    const char* deviceExtensionNames[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
-    VkDeviceCreateInfo createInfo = {
-      VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, // sType
-      nullptr,                              // pNext
-      0,                                    // flags
-      1,                                    // queueCreateInfoCount
-      &queueInfo,                           // pQueueCreateInfos
-      0,                                    // enabledLayerCount
-      nullptr,                              // ppEnabledLayerNames
-      1,                                    // enabledExtensionCount
-      deviceExtensionNames,                 // ppEnabledExtensionNames
-      &deviceFeatures,                      // pEnabledFeatures
-    };
-
-    vkCreateDevice( m_physicalDevices.at( graphicsQueueIndex ), &createInfo, nullptr, &m_vkDevice );
-    vkGetDeviceQueue( m_vkDevice, graphicsQueueIndex, 0, &m_vkGraphicsQueue );
-    vkGetDeviceQueue( m_vkDevice, presentQueueIndex, 0, &m_vkPresentQueue );
-  }
-
-  ~VulkanBase()
-  {
-    vkDestroyDevice( m_vkDevice, nullptr );
-    vkDestroyInstance( m_vkInstance, nullptr );
-    SDL_DestroyWindow( m_window );
-    SDL_Vulkan_UnloadLibrary();
-    SDL_Quit();
-  }
-
-  void createInstance( SDL_Window* wnd )
-  {
-    constexpr VkApplicationInfo appInfo{ .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-                                         .pApplicationName = "Hello Triangle",
-                                         .applicationVersion = VK_MAKE_VERSION( 1, 0, 0 ),
-                                         .pEngineName = "No Engine",
-                                         .engineVersion = VK_MAKE_VERSION( 1, 0, 0 ),
-                                         .apiVersion = vk::ApiVersion14 };
-
-    auto sdlExtCount = 0u;
-    SDL_Vulkan_GetInstanceExtensions( wnd, &sdlExtCount, nullptr );
-    std::vector<const char*> ext( sdlExtCount );
-    SDL_Vulkan_GetInstanceExtensions( wnd, &sdlExtCount, ext.data() );
-
-    VkInstanceCreateInfo instanceInfo{
-      .pApplicationInfo = &appInfo, .enabledExtensionCount = sdlExtCount, .ppEnabledExtensionNames = ext.data() };
-
-    vkCreateInstance( &instanceInfo, nullptr, &m_vkInstance );
-  }
-
-  // enumerate all the graphics cards and return the vector
-  void populatePhysicalDevices()
-  {
-    uint32_t physicalDeviceCount;
-    vkEnumeratePhysicalDevices( m_vkInstance, &physicalDeviceCount, nullptr );
-    m_physicalDevices.resize( physicalDeviceCount );
-    vkEnumeratePhysicalDevices( m_vkInstance, &physicalDeviceCount, m_physicalDevices.data() );
-
-    if ( m_physicalDevices.empty() )
-    {
-      throw std::runtime_error( "no graphics cards available" );
-    }
-  }
-
-  void populateQueueFamily( uint32_t index )
-  {
-    uint32_t queueFamilyCount{ 0 };
-    vkGetPhysicalDeviceQueueFamilyProperties( m_physicalDevices.at( index ), &queueFamilyCount, nullptr );
-    m_queueFamilies.resize( queueFamilyCount );
-    vkGetPhysicalDeviceQueueFamilyProperties(
-      m_physicalDevices.at( index ), &queueFamilyCount, m_queueFamilies.data() );
-  }
-
-  void createDevice()
-  {
-    // auto createInfo = VkDeviceCreateInfo{ .};
-    // vkCreateDevice( m_physicalDevices.at( 0 ), );
+    initVulkan();
+    mainLoop();
+    cleanup();
   }
 
 private:
-  SDL_Window* m_window = nullptr;
-  // everything is built on top of instance, this is the gateway to vulkan
+  void createInstance()
+  {
+    m_data.fill();
+
+    if ( enableValidationLayers && !checkValidationLayerSupport() )
+    {
+      throw std::runtime_error( "validation layers requested, but not available!" );
+    }
+
+    VkApplicationInfo appInfo{};
+    appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+    appInfo.pApplicationName = "Hello Triangle";
+    appInfo.applicationVersion = VK_MAKE_VERSION( 1, 0, 0 );
+    appInfo.pEngineName = "test";
+    appInfo.engineVersion = VK_MAKE_VERSION( 1, 0, 0 );
+    appInfo.apiVersion = VK_API_VERSION_1_4;
+
+    VkInstanceCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    createInfo.pApplicationInfo = &appInfo;
+
+    if ( enableValidationLayers )
+    {
+      createInfo.enabledLayerCount = static_cast<uint32_t>( validationLayers.size() );
+      createInfo.ppEnabledLayerNames = validationLayers.data();
+    }
+    else
+    {
+      createInfo.enabledLayerCount = 0;
+    }
+
+    createInfo.enabledExtensionCount = m_data.extenions.size();
+    createInfo.ppEnabledExtensionNames = m_data.extenions.data();
+    if ( vkCreateInstance( &createInfo, nullptr, &m_vkInstance ) != VK_SUCCESS )
+    {
+      throw std::runtime_error( "failed to create instance!" );
+    }
+
+    // now after instance creation, iterate over devices
+    uint32_t devCount;
+    vkEnumeratePhysicalDevices( m_vkInstance, &devCount, nullptr );
+    assert( devCount != 0 && "something went wrong, no device available" );
+    vkEnumeratePhysicalDevices( m_vkInstance, &devCount, m_data.devices.data() );
+
+    std::cout << "available extensions:\n";
+
+    for ( const auto& extension : m_data.extensionsProperties )
+    {
+      std::cout << '\t' << extension.extensionName << '\n';
+    }
+  }
+
+  void initVulkan()
+  {
+    glfwInit();
+
+    glfwWindowHint( GLFW_CLIENT_API, GLFW_NO_API );
+    glfwWindowHint( GLFW_RESIZABLE, GLFW_FALSE );
+
+    m_window = glfwCreateWindow( 800, 800, "Vulkan", nullptr, nullptr );
+
+    createInstance();
+    setupDebugCallback();
+    pickPhisycalDevice();
+  }
+
+  void setupDebugCallback()
+  {
+    if ( !enableValidationLayers )
+      return;
+    VkDebugUtilsMessengerCreateInfoEXT createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+    createInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
+                                 VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+                                 VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+    createInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
+                             VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
+                             VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+    createInfo.pfnUserCallback = debugCallback;
+    createInfo.pUserData = nullptr; // Optional
+    if ( createDebugUtilsMessengerEXT( m_vkInstance, &createInfo, nullptr, &debugMessenger ) != VK_SUCCESS )
+    {
+      throw std::runtime_error( "could not set up debug log" );
+    }
+  }
+
+  void destroyDebugUtilsMessengerEXT( VkInstance instance,
+                                      VkDebugUtilsMessengerEXT debugMessenger,
+                                      const VkAllocationCallbacks* pAllocator )
+  {
+    auto func =
+      (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr( instance, "vkDestroyDebugUtilsMessengerEXT" );
+    if ( func != nullptr )
+    {
+      func( instance, debugMessenger, pAllocator );
+    }
+  }
+
+  /**
+   * @brief This is needed to load the vkCreateDebugUtilsMessengerEXT with GetInstanceProcAddr
+   * @param instance
+   * @param pCreateInfo
+   * @param pAllocator
+   * @param pDebugMessenger
+   * @return
+   */
+  VkResult createDebugUtilsMessengerEXT( VkInstance instance,
+                                         const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo,
+                                         const VkAllocationCallbacks* pAllocator,
+                                         VkDebugUtilsMessengerEXT* pDebugMessenger )
+  {
+    auto func = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr( instance, "vkCreateDebugUtilsMessengerEXT" );
+    if ( func != nullptr )
+    {
+      return func( instance, pCreateInfo, pAllocator, pDebugMessenger );
+    }
+    else
+    {
+      return VK_ERROR_EXTENSION_NOT_PRESENT;
+    }
+  }
+
+  void mainLoop()
+  {
+    while ( !glfwWindowShouldClose( m_window ) )
+    {
+      glfwPollEvents();
+    }
+  }
+
+  /**
+   * @brief Checks for validation layer support and populates the vector
+   * @return
+   */
+  bool checkValidationLayerSupport()
+  {
+    for ( const char* layerName : validationLayers )
+    {
+      bool layerFound = false;
+
+      for ( const auto& layerProperties : m_data.availableLayers )
+      {
+        if ( strcmp( layerName, layerProperties.layerName ) == 0 )
+        {
+          layerFound = true;
+          break;
+        }
+      }
+
+      if ( !layerFound )
+      {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  void cleanup()
+  {
+    destroyDebugUtilsMessengerEXT( m_vkInstance, debugMessenger, nullptr );
+    vkDestroyInstance( m_vkInstance, nullptr );
+    glfwDestroyWindow( m_window );
+    glfwTerminate();
+  }
+
+  static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback( VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
+                                                       VkDebugUtilsMessageTypeFlagsEXT messageType,
+                                                       const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
+                                                       void* pUserData )
+  {
+
+    std::cerr << "validation layer: " << pCallbackData->pMessage << std::endl;
+
+    return VK_FALSE;
+  }
+
+  void pickPhisycalDevice()
+  {
+    for ( const auto& device : m_data.devices )
+    {
+      if ( isDeviceSuitable( device ) )
+      {
+        m_physicalDevice = device;
+        break;
+      }
+    }
+
+    if ( m_physicalDevice == VK_NULL_HANDLE )
+    {
+      throw std::runtime_error( "failed to find a suitable GPU!" );
+    }
+  }
+
+  bool isDeviceSuitable( const VkPhysicalDevice& device )
+  {
+    return true;
+  }
+
+private:
+  GLFWwindow* m_window;
+
+  // gateway to vulkan, everything goes through the instance
   VkInstance m_vkInstance;
 
-  // this is an interface to the physical device
-  VkDevice m_vkDevice;
-  VkQueue m_vkGraphicsQueue;
-  VkQueue m_vkPresentQueue;
-
-  VkSurfaceKHR m_vkSurface;
-
-  // a physical device represents a sole complete implementation of Vulkan available to the host, of which there are
-  // finite number
-  std::vector<VkPhysicalDevice> m_physicalDevices;
-
-  // the work is not uploaded to a device but rather to one of those queues
-  std::vector<VkQueueFamilyProperties> m_queueFamilies;
+  // this is literally a graphics capable device, GPU
+  VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
+  VkDebugUtilsMessengerEXT debugMessenger;
+  VkInitData m_data;
 };
