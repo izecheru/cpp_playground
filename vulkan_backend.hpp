@@ -24,6 +24,9 @@ struct VkInitData
   // we need this to enumerate all rendering capable devices
   std::vector<VkPhysicalDevice> devices;
 
+  // this is just a helper function to fill the vectors above
+  // the one with devices i cannot fill in this function because i need
+  // the instance to enumerate devices and i create that instance later than this func call
   void fill()
   {
     uint32_t extensionCount = 0;
@@ -60,6 +63,9 @@ public:
   }
 
 private:
+  /**
+   * @brief This is the first func to be called in the vulkan initialization chain
+   */
   void createInstance()
   {
     m_data.fill();
@@ -103,13 +109,6 @@ private:
     vkEnumeratePhysicalDevices( m_vkInstance, &devCount, nullptr );
     assert( devCount != 0 && "something went wrong, no device available" );
     vkEnumeratePhysicalDevices( m_vkInstance, &devCount, m_data.devices.data() );
-
-    std::cout << "available extensions:\n";
-
-    for ( const auto& extension : m_data.extensionsProperties )
-    {
-      std::cout << '\t' << extension.extensionName << '\n';
-    }
   }
 
   void initVulkan()
@@ -119,6 +118,7 @@ private:
     glfwWindowHint( GLFW_CLIENT_API, GLFW_NO_API );
     glfwWindowHint( GLFW_RESIZABLE, GLFW_FALSE );
 
+    // window should be a standalone lib or dll
     m_window = glfwCreateWindow( 800, 800, "Vulkan", nullptr, nullptr );
 
     createInstance();
