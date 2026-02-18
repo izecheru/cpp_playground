@@ -301,6 +301,8 @@ bool VulkanBase::isDeviceSuitable( VkPhysicalDevice& device )
     swapChainAdequate = !swapChainSupport.formats.empty() && !swapChainSupport.presentModes.empty();
   }
 
+  spdlog::info( "extensions supported? {}\nswapchain adequate?{}", extensionsSupported, swapChainAdequate );
+
   if ( deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU && deviceFeatures.geometryShader &&
        indices.isComplete() && extensionsSupported && swapChainAdequate )
     return true;
@@ -631,7 +633,7 @@ void VulkanBase::createInstance()
   appInfo.applicationVersion = VK_MAKE_VERSION( 1, 0, 0 );
   appInfo.pEngineName = "No Engine";
   appInfo.engineVersion = VK_MAKE_VERSION( 1, 0, 0 );
-  appInfo.apiVersion = VK_API_VERSION_1_3;
+  appInfo.apiVersion = VK_API_VERSION_1_4;
 
   VkInstanceCreateInfo createInfo{};
   createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -673,7 +675,7 @@ void VulkanBase::initWindow()
   glfwInit();
 
   glfwWindowHint( GLFW_CLIENT_API, GLFW_NO_API );
-  glfwWindowHint( GLFW_RESIZABLE, GLFW_FALSE );
+  glfwWindowHint( GLFW_RESIZABLE, GLFW_TRUE );
 
   window = glfwCreateWindow( 800, 800, "Vulkan", nullptr, nullptr );
 }
@@ -736,6 +738,7 @@ void VulkanBase::mainLoop()
       spdlog::info( "closing app" );
       glfwSetWindowShouldClose( window, true );
     }
+    vkDeviceWaitIdle( m_device );
   }
 }
 
@@ -829,30 +832,35 @@ auto VulkanBase::findQueueFamilies( VkPhysicalDevice& device ) -> QueueFamilyInd
 
 void VulkanBase::cleanup()
 {
-  if ( enableValidationLayers )
-  {
-    DestroyDebugUtilsMessengerEXT( m_instance, debugMessenger, nullptr );
-  }
+
+  vkDestroySemaphore( m_device, m_imageAvailableSemaphore, nullptr );
+  vkDestroySemaphore( m_device, m_renderFinishedSemaphore, nullptr );
+  vkDestroyFence( m_device, m_inFlightFence, nullptr );
+
+  vkDestroyCommandPool( m_device, m_commandPool, nullptr );
 
   for ( auto framebuffer : m_swapChainFramebuffers )
   {
     vkDestroyFramebuffer( m_device, framebuffer, nullptr );
   }
 
+  vkDestroyPipeline( m_device, m_graphicsPipeline, nullptr );
+  vkDestroyPipelineLayout( m_device, m_pipelineLayout, nullptr );
+  vkDestroyRenderPass( m_device, m_renderPass, nullptr );
+
   for ( auto imageView : m_swapChainImageViews )
   {
     vkDestroyImageView( m_device, imageView, nullptr );
   }
 
-  vkDestroySemaphore( m_device, m_imageAvailableSemaphore, nullptr );
-  vkDestroySemaphore( m_device, m_renderFinishedSemaphore, nullptr );
-  vkDestroyFence( m_device, m_inFlightFence, nullptr );
-  vkDestroyCommandPool( m_device, m_commandPool, nullptr );
-  vkDestroyPipeline( m_device, m_graphicsPipeline, nullptr );
-  vkDestroyPipelineLayout( m_device, m_pipelineLayout, nullptr );
-  vkDestroyRenderPass( m_device, m_renderPass, nullptr );
   vkDestroySwapchainKHR( m_device, m_swapChain, nullptr );
   vkDestroyDevice( m_device, nullptr );
+
+  if ( enableValidationLayers )
+  {
+    DestroyDebugUtilsMessengerEXT( m_instance, debugMessenger, nullptr );
+  }
+
   vkDestroySurfaceKHR( m_instance, m_surface, nullptr );
   vkDestroyInstance( m_instance, nullptr );
   glfwDestroyWindow( window );
