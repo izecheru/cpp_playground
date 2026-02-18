@@ -118,6 +118,31 @@ static auto readFile( const std::string& filePath ) -> std::vector<char>
   return buffer;
 }
 
+void VulkanBase::cleanSwapchain()
+{
+  vkDestroySemaphore( m_device, m_imageAvailableSemaphore, nullptr );
+  vkDestroySemaphore( m_device, m_renderFinishedSemaphore, nullptr );
+  vkDestroyFence( m_device, m_inFlightFence, nullptr );
+
+  vkDestroyCommandPool( m_device, m_commandPool, nullptr );
+
+  for ( auto framebuffer : m_swapChainFramebuffers )
+  {
+    vkDestroyFramebuffer( m_device, framebuffer, nullptr );
+  }
+
+  vkDestroyPipeline( m_device, m_graphicsPipeline, nullptr );
+  vkDestroyPipelineLayout( m_device, m_pipelineLayout, nullptr );
+  vkDestroyRenderPass( m_device, m_renderPass, nullptr );
+
+  for ( auto imageView : m_swapChainImageViews )
+  {
+    vkDestroyImageView( m_device, imageView, nullptr );
+  }
+
+  vkDestroySwapchainKHR( m_device, m_swapChain, nullptr );
+}
+
 void VulkanBase::createFrameBuffers()
 {
   m_swapChainFramebuffers.resize( m_swapChainImages.size() );
@@ -678,6 +703,21 @@ void VulkanBase::initWindow()
   glfwWindowHint( GLFW_RESIZABLE, GLFW_TRUE );
 
   window = glfwCreateWindow( 800, 800, "Vulkan", nullptr, nullptr );
+
+  glfwSetWindowUserPointer( window, this );
+
+  glfwSetWindowSizeCallback( window, []( GLFWwindow* window, int w, int h ) {
+    VulkanBase* app = reinterpret_cast<VulkanBase*>( glfwGetWindowUserPointer( window ) );
+    app->cleanSwapchain();
+    app->createSwapChain();
+    app->createImageViews();
+    app->createRenderPass();
+    app->createGraphicsPipeline();
+    app->createFrameBuffers();
+    app->createCommandPool();
+    app->createCommandBuffer();
+    app->createSyncObj();
+  } );
 }
 
 void VulkanBase::drawFrame()
