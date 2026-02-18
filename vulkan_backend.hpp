@@ -1,11 +1,11 @@
 #pragma once
-#include <cstdlib>
+#define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
-#include <assert.h>
-#include <iostream>
-#include <vulkan/vulkan.hpp>
+#include <spdlog/spdlog.h>
+#include <vulkan/vulkan.h>
 
 const std::vector<const char*> validationLayers = { "VK_LAYER_KHRONOS_validation" };
+const std::vector<const char*> deviceExtensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
 
 #ifdef NDEBUG
 const bool enableValidationLayers = false;
@@ -13,140 +13,104 @@ const bool enableValidationLayers = false;
 const bool enableValidationLayers = true;
 #endif
 
-struct VkInitData
+struct QueueFamilyIndices
 {
-  // this is used for debugging setup
-  std::vector<VkLayerProperties> availableLayers;
-  // extensions supported
-  std::vector<VkExtensionProperties> extensionsProperties;
+  std::optional<uint32_t> graphicsFamily;
+  std::optional<uint32_t> presentFamily;
 
-  std::vector<const char*> extenions;
-  // we need this to enumerate all rendering capable devices
-  std::vector<VkPhysicalDevice> devices;
-
-  // this is just a helper function to fill the vectors above
-  // the one with devices i cannot fill in this function because i need
-  // the instance to enumerate devices and i create that instance later than this func call
-  void fill()
+  bool isComplete() const
   {
-    uint32_t extensionCount = 0;
-    vkEnumerateInstanceExtensionProperties( nullptr, &extensionCount, nullptr );
-    extensionsProperties.resize( extensionCount );
-    vkEnumerateInstanceExtensionProperties( nullptr, &extensionCount, extensionsProperties.data() );
-
-    uint32_t layerCount;
-    vkEnumerateInstanceLayerProperties( &layerCount, nullptr );
-    availableLayers.resize( layerCount );
-    vkEnumerateInstanceLayerProperties( &layerCount, availableLayers.data() );
-
-    uint32_t glfwExtensionCount = 0;
-    const char** glfwExtensions;
-    glfwExtensions = glfwGetRequiredInstanceExtensions( &glfwExtensionCount );
-
-    extenions = std::vector<const char*>( glfwExtensions, glfwExtensions + glfwExtensionCount );
-
-    if ( enableValidationLayers )
-    {
-      extenions.push_back( VK_EXT_DEBUG_UTILS_EXTENSION_NAME );
-    }
+    return graphicsFamily.has_value() && presentFamily.has_value();
   }
 };
 
-class HelloTriangleApplication
+struct SwapChainSupportDetails
+{
+  VkSurfaceCapabilitiesKHR capabilities;
+  std::vector<VkSurfaceFormatKHR> formats;
+  std::vector<VkPresentModeKHR> presentModes;
+};
+
+class VulkanBase
 {
 public:
-  void run()
-  {
-    initVulkan();
-    mainLoop();
-    cleanup();
-  }
+  void createFrameBuffers();
+  void createSurface();
+  void createSyncObj();
 
-private:
-  /**
-   * @brief This is the first func to be called in the vulkan initialization chain
+  void createRenderPass();
+
+  void createLogicalDevice();
+  void pickPhysicalDevice();
+  bool isDeviceSuitable( VkPhysicalDevice& device );
+  bool checkDeviceExtensionSupport( VkPhysicalDevice& device );
+
+  auto querySwapChainSupport( VkPhysicalDevice& device ) -> SwapChainSupportDetails;
+  auto chooseSwapExtent( const VkSurfaceCapabilitiesKHR& capabilities ) -> VkExtent2D;
+  auto chooseSwapPresentMode( const std::vector<VkPresentModeKHR>& availablePresentModes ) -> VkPresentModeKHR;
+  auto chooseSwapSurfaceFormat( const std::vector<VkSurfaceFormatKHR>& availableFormats ) -> VkSurfaceFormatKHR;
+  void createSwapChain();
+  void createImageViews();
+
+  void run();
+  void initVulkan();
+
+  void recordCommandBuffer( VkCommandBuffer& commandBuffer, uint32_t imageIndex );
+
+  void createCommandBuffer();
+
+  void createCommandPool();
+
+  void createGraphicsPipeline();
+  auto createShaderModule( const std::vector<char>& code ) const -> VkShaderModule;
+
+  void createInstance();
+  void initWindow();
+  void drawFrame();
+  void mainLoop();
+
+  // this should not take any params in this context since we store the device as a member variable
+  // but for a clearer view when we abstract this code i'll let it as is
+  auto findQueueFamilies( VkPhysicalDevice& device ) -> QueueFamilyIndices;
+
+  void cleanup();
+
+  void setupDebug();
+  bool checkValidationLayerSupport();
+  void populateDebugMessengerCreateInfo( VkDebugUtilsMessengerCreateInfoEXT& info );
+
+  static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback( VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
+                                                       VkDebugUtilsMessageTypeFlagsEXT messageType,
+                                                       const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
+                                                       void* pUserData )
+  {
+    /*
+    VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT = 0x00000001,
+    VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT = 0x00000010,
+    VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT = 0x00000100,
+    VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT = 0x00001000,
+    VK_DEBUG_UTILS_MESSAGE_SEVERITY_FLAG_BITS_MAX_ENUM_EXT = 0x7FFFFFFF
    */
-  void createInstance()
-  {
-    m_data.fill();
-
-    if ( enableValidationLayers && !checkValidationLayerSupport() )
+    switch ( messageSeverity )
     {
-      throw std::runtime_error( "validation layers requested, but not available!" );
+    case 1 << 0:
+    case 1 << 4:
+      spdlog::info( "---VK_INFO---\n{}\n---", pCallbackData->pMessage );
+      break;
+    case 1 << 8:
+      spdlog::warn( "---VK_WARN---\n{}\n---", pCallbackData->pMessage );
+      break;
+    case 1 << 12:
+      spdlog::error( "---VK_ERR---\n{}\n---", pCallbackData->pMessage );
+      break;
     }
 
-    VkApplicationInfo appInfo{};
-    appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    appInfo.pApplicationName = "Hello Triangle";
-    appInfo.applicationVersion = VK_MAKE_VERSION( 1, 0, 0 );
-    appInfo.pEngineName = "test";
-    appInfo.engineVersion = VK_MAKE_VERSION( 1, 0, 0 );
-    appInfo.apiVersion = VK_API_VERSION_1_4;
-
-    VkInstanceCreateInfo createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    createInfo.pApplicationInfo = &appInfo;
-
-    if ( enableValidationLayers )
-    {
-      createInfo.enabledLayerCount = static_cast<uint32_t>( validationLayers.size() );
-      createInfo.ppEnabledLayerNames = validationLayers.data();
-    }
-    else
-    {
-      createInfo.enabledLayerCount = 0;
-    }
-
-    createInfo.enabledExtensionCount = m_data.extenions.size();
-    createInfo.ppEnabledExtensionNames = m_data.extenions.data();
-    if ( vkCreateInstance( &createInfo, nullptr, &m_vkInstance ) != VK_SUCCESS )
-    {
-      throw std::runtime_error( "failed to create instance!" );
-    }
-
-    // now after instance creation, iterate over devices
-    uint32_t devCount;
-    vkEnumeratePhysicalDevices( m_vkInstance, &devCount, nullptr );
-    assert( devCount != 0 && "something went wrong, no device available" );
-    vkEnumeratePhysicalDevices( m_vkInstance, &devCount, m_data.devices.data() );
+    return VK_FALSE;
   }
 
-  void initVulkan()
-  {
-    glfwInit();
+  auto getRequiredExtensions() -> std::vector<const char*>;
 
-    glfwWindowHint( GLFW_CLIENT_API, GLFW_NO_API );
-    glfwWindowHint( GLFW_RESIZABLE, GLFW_FALSE );
-
-    // window should be a standalone lib or dll
-    m_window = glfwCreateWindow( 800, 800, "Vulkan", nullptr, nullptr );
-
-    createInstance();
-    setupDebugCallback();
-    pickPhisycalDevice();
-  }
-
-  void setupDebugCallback()
-  {
-    if ( !enableValidationLayers )
-      return;
-    VkDebugUtilsMessengerCreateInfoEXT createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-    createInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
-                                 VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
-                                 VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
-    createInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
-                             VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
-                             VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
-    createInfo.pfnUserCallback = debugCallback;
-    createInfo.pUserData = nullptr; // Optional
-    if ( createDebugUtilsMessengerEXT( m_vkInstance, &createInfo, nullptr, &debugMessenger ) != VK_SUCCESS )
-    {
-      throw std::runtime_error( "could not set up debug log" );
-    }
-  }
-
-  void destroyDebugUtilsMessengerEXT( VkInstance instance,
+  void DestroyDebugUtilsMessengerEXT( VkInstance instance,
                                       VkDebugUtilsMessengerEXT debugMessenger,
                                       const VkAllocationCallbacks* pAllocator )
   {
@@ -158,15 +122,7 @@ private:
     }
   }
 
-  /**
-   * @brief This is needed to load the vkCreateDebugUtilsMessengerEXT with GetInstanceProcAddr
-   * @param instance
-   * @param pCreateInfo
-   * @param pAllocator
-   * @param pDebugMessenger
-   * @return
-   */
-  VkResult createDebugUtilsMessengerEXT( VkInstance instance,
+  VkResult CreateDebugUtilsMessengerEXT( VkInstance instance,
                                          const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo,
                                          const VkAllocationCallbacks* pAllocator,
                                          VkDebugUtilsMessengerEXT* pDebugMessenger )
@@ -182,91 +138,35 @@ private:
     }
   }
 
-  void mainLoop()
-  {
-    while ( !glfwWindowShouldClose( m_window ) )
-    {
-      glfwPollEvents();
-    }
-  }
-
-  /**
-   * @brief Checks for validation layer support and populates the vector
-   * @return
-   */
-  bool checkValidationLayerSupport()
-  {
-    for ( const char* layerName : validationLayers )
-    {
-      bool layerFound = false;
-
-      for ( const auto& layerProperties : m_data.availableLayers )
-      {
-        if ( strcmp( layerName, layerProperties.layerName ) == 0 )
-        {
-          layerFound = true;
-          break;
-        }
-      }
-
-      if ( !layerFound )
-      {
-        return false;
-      }
-    }
-
-    return true;
-  }
-
-  void cleanup()
-  {
-    destroyDebugUtilsMessengerEXT( m_vkInstance, debugMessenger, nullptr );
-    vkDestroyInstance( m_vkInstance, nullptr );
-    glfwDestroyWindow( m_window );
-    glfwTerminate();
-  }
-
-  static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback( VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
-                                                       VkDebugUtilsMessageTypeFlagsEXT messageType,
-                                                       const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
-                                                       void* pUserData )
-  {
-
-    std::cerr << "validation layer: " << pCallbackData->pMessage << std::endl;
-
-    return VK_FALSE;
-  }
-
-  void pickPhisycalDevice()
-  {
-    for ( const auto& device : m_data.devices )
-    {
-      if ( isDeviceSuitable( device ) )
-      {
-        m_physicalDevice = device;
-        break;
-      }
-    }
-
-    if ( m_physicalDevice == VK_NULL_HANDLE )
-    {
-      throw std::runtime_error( "failed to find a suitable GPU!" );
-    }
-  }
-
-  bool isDeviceSuitable( const VkPhysicalDevice& device )
-  {
-    return true;
-  }
-
 private:
-  GLFWwindow* m_window;
-
-  // gateway to vulkan, everything goes through the instance
-  VkInstance m_vkInstance;
-
-  // this is literally a graphics capable device, GPU
-  VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
+  GLFWwindow* window;
+  VkInstance m_instance;
   VkDebugUtilsMessengerEXT debugMessenger;
-  VkInitData m_data;
+
+  VkPhysicalDevice m_physicalDevice{ VK_NULL_HANDLE };
+  VkDevice m_device;
+
+  VkQueue m_graphicsQueue;
+  VkQueue m_presentQueue;
+
+  // window surface
+  VkSurfaceKHR m_surface;
+
+  VkSwapchainKHR m_swapChain;
+  std::vector<VkImage> m_swapChainImages;
+  std::vector<VkFramebuffer> m_swapChainFramebuffers;
+  VkFormat m_swapChainImageFormat;
+  VkExtent2D m_swapChainExtent;
+  std::vector<VkImageView> m_swapChainImageViews;
+  VkPipelineLayout m_pipelineLayout;
+  VkPipeline m_graphicsPipeline;
+  VkRenderPass m_renderPass;
+
+  VkCommandPool m_commandPool;
+  VkCommandBuffer m_commandBuffer;
+
+  // sync
+  VkSemaphore m_imageAvailableSemaphore;
+  VkSemaphore m_renderFinishedSemaphore;
+  VkFence m_inFlightFence;
 };

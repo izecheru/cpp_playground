@@ -1,15 +1,16 @@
-﻿#include "vulkan_backend.hpp"
+﻿#include <iostream>
+#include "vulkan_backend.hpp"
 
 int main()
 {
   try
   {
-    HelloTriangleApplication app;
+    VulkanBase app;
     app.run();
   }
   catch ( std::exception& e )
   {
-    std::cout << e.what();
+    std::cout << "something went wrong" << e.what();
   }
   return 0;
 }
