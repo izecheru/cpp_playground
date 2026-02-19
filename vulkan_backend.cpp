@@ -697,27 +697,6 @@ void VulkanBase::createInstance()
 
 void VulkanBase::initWindow()
 {
-  glfwInit();
-
-  glfwWindowHint( GLFW_CLIENT_API, GLFW_NO_API );
-  glfwWindowHint( GLFW_RESIZABLE, GLFW_TRUE );
-
-  window = glfwCreateWindow( 800, 800, "Vulkan", nullptr, nullptr );
-
-  glfwSetWindowUserPointer( window, this );
-
-  glfwSetWindowSizeCallback( window, []( GLFWwindow* window, int w, int h ) {
-    VulkanBase* app = reinterpret_cast<VulkanBase*>( glfwGetWindowUserPointer( window ) );
-    app->cleanSwapchain();
-    app->createSwapChain();
-    app->createImageViews();
-    app->createRenderPass();
-    app->createGraphicsPipeline();
-    app->createFrameBuffers();
-    app->createCommandPool();
-    app->createCommandBuffer();
-    app->createSyncObj();
-  } );
 }
 
 void VulkanBase::drawFrame()
