@@ -1,0 +1,11 @@
+﻿set(Target_sources
+"include/vulkan_device/vulkan_device.hpp"
+"src/vulkan_device.cpp"
+ 
+)
+add_library(vulkan_abstraction STATIC "${Target_sources}")
+
+target_include_directories(vulkan_abstraction PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(vulkan_abstraction PRIVATE Vulkan::Vulkan glfw spdlog::spdlog)
