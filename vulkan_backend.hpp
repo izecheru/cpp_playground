@@ -5,7 +5,8 @@
 #include <vulkan/vulkan.h>
 
 const std::vector<const char*> validationLayers = { "VK_LAYER_KHRONOS_validation" };
-const std::vector<const char*> deviceExtensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+const std::vector<const char*> deviceExtensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+                                                    VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME };
 
 #ifdef NDEBUG
 const bool enableValidationLayers = false;
@@ -13,17 +14,30 @@ const bool enableValidationLayers = false;
 const bool enableValidationLayers = true;
 #endif
 
+struct QueueFamilyIndices
+{
+  std::optional<uint32_t> graphicsFamily;
+  std::optional<uint32_t> presentFamily;
+
+  bool isComplete() const
+  {
+    return graphicsFamily.has_value() && presentFamily.has_value();
+  }
+};
+
+struct SwapChainSupportDetails
+{
+  VkSurfaceCapabilitiesKHR capabilities;
+  std::vector<VkSurfaceFormatKHR> formats;
+  std::vector<VkPresentModeKHR> presentModes;
+};
+
 class VulkanBase
 {
 public:
   void cleanSwapchain();
-
-  void createFrameBuffers();
   void createSurface();
   void createSyncObj();
-
-  void createRenderPass();
-
   void createLogicalDevice();
   void pickPhysicalDevice();
   bool isDeviceSuitable( VkPhysicalDevice& device );
@@ -51,8 +65,6 @@ public:
   void drawFrame();
   void mainLoop();
 
-  // this should not take any params in this context since we store the device as a member variable
-  // but for a clearer view when we abstract this code i'll let it as is
   auto findQueueFamilies( VkPhysicalDevice& device ) -> QueueFamilyIndices;
 
   void cleanup();
@@ -136,13 +148,11 @@ private:
 
   VkSwapchainKHR m_swapChain;
   std::vector<VkImage> m_swapChainImages;
-  std::vector<VkFramebuffer> m_swapChainFramebuffers;
   VkFormat m_swapChainImageFormat;
   VkExtent2D m_swapChainExtent;
   std::vector<VkImageView> m_swapChainImageViews;
   VkPipelineLayout m_pipelineLayout;
   VkPipeline m_graphicsPipeline;
-  VkRenderPass m_renderPass;
 
   VkCommandPool m_commandPool;
   VkCommandBuffer m_commandBuffer;

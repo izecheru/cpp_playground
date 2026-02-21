@@ -22,13 +22,6 @@ struct VulkanPlatform
   VkSurfaceKHR surface = VK_NULL_HANDLE;
 };
 
-struct SwapChainSupportDetails
-{
-  VkSurfaceCapabilitiesKHR capabilities;
-  std::vector<VkSurfaceFormatKHR> formats;
-  std::vector<VkPresentModeKHR> presentModes;
-};
-
 struct QueueFamilyIndices
 {
   std::optional<uint32_t> graphicsFamily;
@@ -66,14 +59,13 @@ public:
   static auto getLogicalDevice() -> VkDevice&;
   static auto getSurface() -> VkSurfaceKHR&;
 
-  inline static auto getInstance() -> VulkanDevice*
+  inline static auto getInstance() -> std::shared_ptr<VulkanDevice>
   {
-    static VulkanDevice instance;
-    return &instance;
+    static auto instance = std::make_shared<VulkanDevice>();
+    return instance;
   }
 
 private:
-  auto querySwapChainSupport( VkPhysicalDevice& device ) -> SwapChainSupportDetails;
   auto findQueueFamilies( VkPhysicalDevice& device ) -> QueueFamilyIndices;
   bool isDeviceSuitable( VkPhysicalDevice& device );
 
@@ -85,6 +77,10 @@ private:
 private:
   static inline VulkanPlatform m_platform;
   static inline GLFWwindow* m_window{ nullptr };
+
+  static inline VkPhysicalDeviceProperties m_physicalDeviceProps;
+  static inline VkPhysicalDeviceMemoryProperties m_physicalDeviceMemoryProps;
+  static inline VkPhysicalDeviceFeatures m_physicalDeviceFeatures;
 
   VkDebugUtilsMessengerEXT m_debugMessenger{ VK_NULL_HANDLE };
 

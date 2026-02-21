@@ -53,32 +53,6 @@ bool checkDeviceExtensionSupport( VkPhysicalDevice& device )
   return requiredExtensions.empty();
 }
 
-auto VulkanDevice::querySwapChainSupport( VkPhysicalDevice& device ) -> SwapChainSupportDetails
-{
-  SwapChainSupportDetails details;
-  vkGetPhysicalDeviceSurfaceCapabilitiesKHR( device, m_platform.surface, &details.capabilities );
-  uint32_t formatCount;
-  vkGetPhysicalDeviceSurfaceFormatsKHR( device, m_platform.surface, &formatCount, nullptr );
-
-  if ( formatCount != 0 )
-  {
-    details.formats.resize( formatCount );
-    vkGetPhysicalDeviceSurfaceFormatsKHR( device, m_platform.surface, &formatCount, details.formats.data() );
-  }
-
-  uint32_t presentModeCount;
-  vkGetPhysicalDeviceSurfacePresentModesKHR( device, m_platform.surface, &presentModeCount, nullptr );
-
-  if ( presentModeCount != 0 )
-  {
-    details.presentModes.resize( presentModeCount );
-    vkGetPhysicalDeviceSurfacePresentModesKHR(
-      device, m_platform.surface, &presentModeCount, details.presentModes.data() );
-  }
-
-  return details;
-}
-
 auto VulkanDevice::findQueueFamilies( VkPhysicalDevice& device ) -> QueueFamilyIndices
 {
   QueueFamilyIndices indices;
@@ -124,17 +98,11 @@ bool VulkanDevice::isDeviceSuitable( VkPhysicalDevice& device )
   auto extensionsSupported = checkDeviceExtensionSupport( device );
   auto families = findQueueFamilies( device );
 
-  // check to see swap chain support
-  bool swapChainAdequate = false;
-  if ( extensionsSupported )
-  {
-    SwapChainSupportDetails swapChainSupport = querySwapChainSupport( device );
-    swapChainAdequate = !swapChainSupport.formats.empty() && !swapChainSupport.presentModes.empty();
-  }
-
   if ( deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU && deviceFeatures.geometryShader &&
-       extensionsSupported && swapChainAdequate && families.isComplete() )
+       extensionsSupported && families.isComplete() )
+  {
     return true;
+  }
 
   return false;
 }
@@ -183,7 +151,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback( VkDebugUtilsMessageSeverity
   case 1 << 12:
     spdlog::error( "---VK_ERR---" );
     spdlog::error( pCallbackData->pMessage );
-    spdlog::warn( "------\n" );
+    spdlog::error( "------\n" );
     break;
   }
 
@@ -273,11 +241,14 @@ auto VulkanDevice::getSurface() -> VkSurfaceKHR&
 
 void VulkanDevice::init()
 {
+  spdlog::info( "initializing device" );
   createWindow();
   createInstance();
   createWindowSurface();
   pickPhysicalDevice();
   createLogicalDevice();
+
+  spdlog::info( "initialization finished" );
 }
 
 void VulkanDevice::setupDebug()
@@ -394,10 +365,11 @@ void VulkanDevice::pickPhysicalDevice()
   {
     if ( isDeviceSuitable( device ) )
     {
-      VkPhysicalDeviceProperties props;
-      vkGetPhysicalDeviceProperties( device, &props );
-      spdlog::info( "VkPhysicalDevice: {}", props.deviceName );
       m_platform.physicalDevice = device;
+      vkGetPhysicalDeviceMemoryProperties( device, &m_physicalDeviceMemoryProps );
+      vkGetPhysicalDeviceProperties( device, &m_physicalDeviceProps );
+      vkGetPhysicalDeviceFeatures( device, &m_physicalDeviceFeatures );
+      spdlog::info( "VkPhysicalDevice: {}", m_physicalDeviceProps.deviceName );
       break;
     }
   }

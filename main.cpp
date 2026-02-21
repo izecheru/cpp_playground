@@ -1,5 +1,6 @@
 ﻿#include <iostream>
 #include "vulkan_device/vulkan_device.hpp"
+#include "vulkan_swapchain/vulkan_swapchain.hpp"
 
 int main()
 {
@@ -7,6 +8,8 @@ int main()
   {
     const auto& vulkanDevice = VulkanDevice::getInstance();
     vulkanDevice->init();
+    std::unique_ptr<VulkanSwapchain> swapchain = std::make_unique<VulkanSwapchain>( vulkanDevice );
+    swapchain.reset();
     vulkanDevice->shutdown();
   }
   catch ( std::exception& e )
