@@ -49,6 +49,7 @@ public:
   auto chooseSwapSurfaceFormat( const std::vector<VkSurfaceFormatKHR>& availableFormats ) -> VkSurfaceFormatKHR;
   void createSwapChain();
   void createImageViews();
+  void createDepthResources();
 
   void run();
   void initVulkan();
@@ -104,6 +105,25 @@ public:
 
   auto getRequiredExtensions() -> std::vector<const char*>;
 
+  void createImage( uint32_t width,
+                    uint32_t height,
+                    VkFormat format,
+                    VkImageTiling tiling,
+                    VkImageUsageFlags usage,
+                    VkMemoryPropertyFlags properties,
+                    VkImage& image,
+                    VkDeviceMemory& imageMemory );
+
+  auto findMemoryType( uint32_t typeFilter, VkMemoryPropertyFlags properties ) -> uint32_t;
+
+  auto findSupportedFormat( const std::vector<VkFormat>& candidates,
+                            VkImageTiling tiling,
+                            VkFormatFeatureFlags features ) -> VkFormat;
+
+  auto findDepthFormat() -> VkFormat;
+
+  auto createImageView( VkImage image, VkFormat format, VkImageAspectFlags aspectFlags ) -> VkImageView;
+
   void DestroyDebugUtilsMessengerEXT( VkInstance instance,
                                       VkDebugUtilsMessengerEXT debugMessenger,
                                       const VkAllocationCallbacks* pAllocator )
@@ -148,6 +168,11 @@ private:
 
   VkSwapchainKHR m_swapChain;
   std::vector<VkImage> m_swapChainImages;
+
+  VkImage m_detphImage;
+  VkImageView m_depthView;
+  VkDeviceMemory m_depthMemory;
+
   VkFormat m_swapChainImageFormat;
   VkExtent2D m_swapChainExtent;
   std::vector<VkImageView> m_swapChainImageViews;

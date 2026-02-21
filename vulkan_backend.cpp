@@ -16,6 +16,7 @@ void VulkanBase::initVulkan()
   createLogicalDevice();
   createSwapChain();
   createImageViews();
+  createDepthResources();
   createGraphicsPipeline();
   createCommandPool();
   createCommandBuffer();
@@ -50,20 +51,28 @@ void VulkanBase::recordCommandBuffer( VkCommandBuffer& cmd, uint32_t imageIndex 
                         1,
                         &barrier );
 
-  VkRenderingAttachmentInfo colorAttachment{};
-  colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-  colorAttachment.imageView = m_swapChainImageViews[imageIndex];
-  colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-  colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-  colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-  colorAttachment.clearValue = { { 0.f, 0.f, 0.f, 1.f } };
+  VkRenderingAttachmentInfo depthAttachment{ .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                                             .imageView = m_depthView,
+                                             .imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                                             .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                                             .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+                                             .clearValue = { { 1.f, 0.f } } };
 
-  VkRenderingInfo renderingInfo{};
-  renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
-  renderingInfo.renderArea = { { 0, 0 }, m_swapChainExtent };
-  renderingInfo.layerCount = 1;
-  renderingInfo.colorAttachmentCount = 1;
-  renderingInfo.pColorAttachments = &colorAttachment;
+  VkRenderingAttachmentInfo colorAttachment{ .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                                             .imageView = m_swapChainImageViews[imageIndex],
+                                             .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                                             .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                                             .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+                                             .clearValue = { { 0.f, 0.f, 0.f, 1.f } } };
+
+  VkRenderingInfo renderingInfo{
+    .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+    .renderArea = { { 0, 0 }, m_swapChainExtent },
+    .layerCount = 1,
+    .colorAttachmentCount = 1,
+    .pColorAttachments = &colorAttachment,
+    .pDepthAttachment = &depthAttachment,
+  };
 
   vkCmdBeginRendering( cmd, &renderingInfo );
 
@@ -444,27 +453,25 @@ void VulkanBase::createSwapChain()
 void VulkanBase::createImageViews()
 {
   m_swapChainImageViews.resize( m_swapChainImages.size() );
-  for ( size_t i = 0; i < m_swapChainImages.size(); i++ )
+  for ( auto i = 0u; i < m_swapChainImageViews.size(); i++ )
   {
-    VkImageViewCreateInfo createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    createInfo.image = m_swapChainImages[i];
-    createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    createInfo.format = m_swapChainImageFormat;
-    createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-    createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-    createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-    createInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-    createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    createInfo.subresourceRange.baseMipLevel = 0;
-    createInfo.subresourceRange.levelCount = 1;
-    createInfo.subresourceRange.baseArrayLayer = 0;
-    createInfo.subresourceRange.layerCount = 1;
-    if ( vkCreateImageView( m_device, &createInfo, nullptr, &m_swapChainImageViews[i] ) != VK_SUCCESS )
-    {
-      throw std::runtime_error( "failed to create image views!" );
-    }
+    m_swapChainImageViews.at( i ) =
+      createImageView( m_swapChainImages.at( i ), m_swapChainImageFormat, VK_IMAGE_ASPECT_COLOR_BIT );
   }
+}
+
+void VulkanBase::createDepthResources()
+{
+  auto depthFormat = findDepthFormat();
+  createImage( m_swapChainExtent.width,
+               m_swapChainExtent.height,
+               depthFormat,
+               VK_IMAGE_TILING_OPTIMAL,
+               VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+               m_detphImage,
+               m_depthMemory );
+  m_depthView = createImageView( m_detphImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT );
 }
 
 auto VulkanBase::chooseSwapSurfaceFormat( const std::vector<VkSurfaceFormatKHR>& availableFormats )
@@ -573,6 +580,16 @@ void VulkanBase::createGraphicsPipeline()
   renderingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
   renderingInfo.colorAttachmentCount = 1;
   renderingInfo.pColorAttachmentFormats = &m_swapChainImageFormat;
+  renderingInfo.depthAttachmentFormat = findDepthFormat();
+  renderingInfo.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
+
+  VkPipelineDepthStencilStateCreateInfo depthStencil{};
+  depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+  depthStencil.depthTestEnable = VK_TRUE;
+  depthStencil.depthWriteEnable = VK_TRUE;
+  depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+  depthStencil.depthBoundsTestEnable = VK_FALSE;
+  depthStencil.stencilTestEnable = VK_FALSE;
 
   VkGraphicsPipelineCreateInfo pipelineInfo{};
   pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -590,6 +607,7 @@ void VulkanBase::createGraphicsPipeline()
   pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
   pipelineInfo.renderPass = VK_NULL_HANDLE;
   pipelineInfo.pNext = &renderingInfo;
+  pipelineInfo.pDepthStencilState = &depthStencil;
 
   if ( vkCreateGraphicsPipelines( m_device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_graphicsPipeline ) !=
        VK_SUCCESS )
@@ -882,4 +900,116 @@ auto VulkanBase::getRequiredExtensions() -> std::vector<const char*>
   }
 
   return extensions;
+}
+
+void VulkanBase::createImage( uint32_t width,
+                              uint32_t height,
+                              VkFormat format,
+                              VkImageTiling tiling,
+                              VkImageUsageFlags usage,
+                              VkMemoryPropertyFlags properties,
+                              VkImage& image,
+                              VkDeviceMemory& imageMemory )
+{
+  VkImageCreateInfo imageInfo{};
+  imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+  imageInfo.imageType = VK_IMAGE_TYPE_2D;
+  imageInfo.extent.width = width;
+  imageInfo.extent.height = height;
+  imageInfo.extent.depth = 1;
+  imageInfo.mipLevels = 1;
+  imageInfo.arrayLayers = 1;
+  imageInfo.format = format;
+  imageInfo.tiling = tiling;
+  imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  imageInfo.usage = usage;
+  imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+  imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+  if ( vkCreateImage( m_device, &imageInfo, nullptr, &image ) != VK_SUCCESS )
+  {
+    throw std::runtime_error( "failed to create image!" );
+  }
+
+  VkMemoryRequirements memRequirements;
+  vkGetImageMemoryRequirements( m_device, image, &memRequirements );
+
+  VkMemoryAllocateInfo allocInfo{};
+  allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+  allocInfo.allocationSize = memRequirements.size;
+  allocInfo.memoryTypeIndex = findMemoryType( memRequirements.memoryTypeBits, properties );
+
+  if ( vkAllocateMemory( m_device, &allocInfo, nullptr, &imageMemory ) != VK_SUCCESS )
+  {
+    throw std::runtime_error( "failed to allocate image memory!" );
+  }
+
+  vkBindImageMemory( m_device, image, imageMemory, 0 );
+}
+
+auto VulkanBase::findMemoryType( uint32_t typeFilter, VkMemoryPropertyFlags properties ) -> uint32_t
+{
+  VkPhysicalDeviceMemoryProperties memProperties;
+  vkGetPhysicalDeviceMemoryProperties( m_physicalDevice, &memProperties );
+
+  for ( uint32_t i = 0; i < memProperties.memoryTypeCount; i++ )
+  {
+    if ( ( typeFilter & ( 1 << i ) ) && ( memProperties.memoryTypes[i].propertyFlags & properties ) == properties )
+    {
+      return i;
+    }
+  }
+
+  throw std::runtime_error( "failed to find suitable memory type!" );
+}
+
+auto VulkanBase::findSupportedFormat( const std::vector<VkFormat>& candidates,
+                                      VkImageTiling tiling,
+                                      VkFormatFeatureFlags features ) -> VkFormat
+{
+  for ( VkFormat format : candidates )
+  {
+    VkFormatProperties props;
+    vkGetPhysicalDeviceFormatProperties( m_physicalDevice, format, &props );
+
+    if ( tiling == VK_IMAGE_TILING_LINEAR && ( props.linearTilingFeatures & features ) == features )
+    {
+      return format;
+    }
+    else if ( tiling == VK_IMAGE_TILING_OPTIMAL && ( props.optimalTilingFeatures & features ) == features )
+    {
+      return format;
+    }
+  }
+
+  throw std::runtime_error( "failed to find supported format!" );
+}
+
+auto VulkanBase::findDepthFormat() -> VkFormat
+{
+  return findSupportedFormat( { VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT },
+                              VK_IMAGE_TILING_OPTIMAL,
+                              VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT );
+}
+
+auto VulkanBase::createImageView( VkImage image, VkFormat format, VkImageAspectFlags aspectFlags ) -> VkImageView
+{
+  VkImageViewCreateInfo viewInfo{};
+  viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+  viewInfo.image = image;
+  viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+  viewInfo.format = format;
+  viewInfo.subresourceRange.aspectMask = aspectFlags;
+  viewInfo.subresourceRange.baseMipLevel = 0;
+  viewInfo.subresourceRange.levelCount = 1;
+  viewInfo.subresourceRange.baseArrayLayer = 0;
+  viewInfo.subresourceRange.layerCount = 1;
+
+  VkImageView imageView;
+  if ( vkCreateImageView( m_device, &viewInfo, nullptr, &imageView ) != VK_SUCCESS )
+  {
+    throw std::runtime_error( "failed to create image view!" );
+  }
+
+  return imageView;
 }
