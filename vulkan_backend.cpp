@@ -1,3 +1,4 @@
+#define STB_IMAGE_IMPLEMENTATION
 #include "vulkan_backend.hpp"
 #include <chrono>
 #include <algorithm>
@@ -8,8 +9,6 @@
 #include <set>
 #include <spdlog/spdlog.h>
 #include "stb_image.h"
-#define STB_IMAGE_IMPLEMENTATION
-#include <stb_image.h>
 
 void VulkanBase::initVulkan()
 {
@@ -49,13 +48,11 @@ void VulkanBase::initVulkan()
 void VulkanBase::createUniformBuffers()
 {
   VkDeviceSize bufferSize = sizeof( UniformBufferoObject );
-  auto count = m_swapChainImages.size();
+  m_uniformBuffers.resize( MAX_FRAMES_IN_FLIGHT );
+  m_uniformBuffersMemory.resize( MAX_FRAMES_IN_FLIGHT );
+  m_uniformBuffersMapped.resize( MAX_FRAMES_IN_FLIGHT );
 
-  m_uniformBuffers.resize( count );
-  m_uniformBuffersMemory.resize( count );
-  m_uniformBuffersMapped.resize( count );
-
-  for ( size_t i = 0; i < count; i++ )
+  for ( size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++ )
   {
     createBuffer( bufferSize,
                   VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
@@ -184,7 +181,7 @@ void VulkanBase::recordCommandBuffer( VkCommandBuffer& cmd, uint32_t imageIndex 
 void VulkanBase::createCommandBuffer()
 {
   m_commandBuffers.resize( MAX_FRAMES_IN_FLIGHT );
-  for ( auto i = 0u; i < 2; i++ )
+  for ( auto i = 0u; i < MAX_FRAMES_IN_FLIGHT; i++ )
   {
     VkCommandBufferAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -219,7 +216,7 @@ static auto readFile( const std::string& filePath ) -> std::vector<char>
 
   if ( !file.is_open() )
   {
-    throw std::runtime_error( "failed to open file!\n" );
+    throw std::runtime_error( "failed to open shader file!\n" );
   }
   size_t fileSize = (size_t)file.tellg();
   std::vector<char> buffer( fileSize );
@@ -244,25 +241,24 @@ void VulkanBase::copyBuffer( VkBuffer src, VkBuffer dst, VkDeviceSize size )
 void VulkanBase::recreateSwapchain()
 {
   int width = 0, height = 0;
-  while ( width == 0 || height == 0 )
-  {
-    glfwGetFramebufferSize( window, &width, &height );
-    glfwWaitEvents();
-  }
+  SDL_GetWindowSize( window, &width, &height );
+  if ( width == 0 || height == 0 )
+    return;
 
   vkDeviceWaitIdle( m_device );
-
   cleanSwapchain();
 
   createSwapChain();
   createImageViews();
   createDepthResources();
+  createTextureImage();
+  createTextureImageView();
+  createTextureSamplers();
 
   createUniformBuffers();
+  createDescriptorSetLayout();
   createDescriptorPool();
   createDescriptorSets();
-
-  createGraphicsPipeline();
 
   createCommandBuffer();
 }
@@ -544,12 +540,13 @@ void VulkanBase::createDescriptorSets()
 
 void VulkanBase::cleanSwapchain()
 {
-  vkDeviceWaitIdle( m_device );
-
-  // destroy depth image
-  vkDestroyImageView( m_device, m_depthView, nullptr );
   vkDestroyImage( m_device, m_depthImage, nullptr );
+  vkDestroyImageView( m_device, m_depthView, nullptr );
   vkFreeMemory( m_device, m_depthMemory, nullptr );
+
+  vkDestroyImage( m_device, m_textureImage, nullptr );
+  vkDestroyImageView( m_device, m_textureView, nullptr );
+  vkFreeMemory( m_device, m_textureImageMemory, nullptr );
 
   // destroy uniform buffers
   for ( auto i = 0u; i < m_uniformBuffers.size(); i++ )
@@ -559,9 +556,7 @@ void VulkanBase::cleanSwapchain()
   }
 
   vkDestroyDescriptorPool( m_device, m_descriptorPool, nullptr );
-
-  vkDestroyPipeline( m_device, m_graphicsPipeline, nullptr );
-  vkDestroyPipelineLayout( m_device, m_pipelineLayout, nullptr );
+  vkDestroyDescriptorSetLayout( m_device, m_descriptorSetLayout, nullptr );
 
   for ( auto imageView : m_swapChainImageViews )
   {
@@ -573,7 +568,7 @@ void VulkanBase::cleanSwapchain()
 
 void VulkanBase::createSurface()
 {
-  if ( glfwCreateWindowSurface( m_instance, window, nullptr, &m_surface ) != VK_SUCCESS )
+  if ( SDL_Vulkan_CreateSurface( window, m_instance, &m_surface ) != SDL_TRUE )
   {
     throw std::runtime_error( "could not create surface" );
   }
@@ -707,8 +702,6 @@ bool VulkanBase::isDeviceSuitable( VkPhysicalDevice& device )
     swapChainAdequate = !swapChainSupport.formats.empty() && !swapChainSupport.presentModes.empty();
   }
 
-  spdlog::info( "extensions supported? {}\nswapchain adequate?{}", extensionsSupported, swapChainAdequate );
-
   if ( deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU && deviceFeatures.geometryShader &&
        indices.isComplete() && extensionsSupported && swapChainAdequate )
     return true;
@@ -771,7 +764,7 @@ auto VulkanBase::chooseSwapExtent( const VkSurfaceCapabilitiesKHR& capabilities 
   else
   {
     int width, height;
-    glfwGetFramebufferSize( window, &width, &height );
+    SDL_GetWindowSize( window, &width, &height );
 
     VkExtent2D actualExtent = { static_cast<uint32_t>( width ), static_cast<uint32_t>( height ) };
 
@@ -828,7 +821,7 @@ void VulkanBase::createSwapChain()
   if ( indices.graphicsFamily != indices.presentFamily )
   {
     createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
-    createInfo.queueFamilyIndexCount = 3;
+    createInfo.queueFamilyIndexCount = 2;
     createInfo.pQueueFamilyIndices = queueFamilyIndices;
   }
   else
@@ -900,27 +893,28 @@ void VulkanBase::createDepthResources()
 
 void VulkanBase::createTextureImage()
 {
+#define pic "F:/github/cpp_playground/test.jpg"
   int texWidth, texHeight, texChannels;
-  stbi_uc* pixels = stbi_load( "D:/basescu.jpg", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha );
-  VkDeviceSize imageSize = texWidth * texHeight * 4;
+  stbi_uc* pixels = stbi_load( pic, &texWidth, &texHeight, &texChannels, STBI_rgb_alpha );
 
   if ( !pixels )
   {
+    spdlog::error( stbi_failure_reason() );
     throw std::runtime_error( "failed to load texture image!" );
   }
 
-  VkBuffer stagingBuffer;
-  VkDeviceMemory stagingBufferMemory;
+  VkDeviceSize imageSize = texWidth * texHeight * 4;
+
   createBuffer( imageSize,
                 VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                stagingBuffer,
-                stagingBufferMemory );
+                m_stageBuffer,
+                m_stageBufferMemory );
 
   void* data;
-  vkMapMemory( m_device, stagingBufferMemory, 0, imageSize, 0, &data );
+  vkMapMemory( m_device, m_stageBufferMemory, 0, imageSize, 0, &data );
   memcpy( data, pixels, static_cast<size_t>( imageSize ) );
-  vkUnmapMemory( m_device, stagingBufferMemory );
+  vkUnmapMemory( m_device, m_stageBufferMemory );
 
   stbi_image_free( pixels );
 
@@ -936,7 +930,7 @@ void VulkanBase::createTextureImage()
   transitionImageLayout(
     m_textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL );
   copyBufferToImage(
-    stagingBuffer, m_textureImage, static_cast<uint32_t>( texWidth ), static_cast<uint32_t>( texHeight ) );
+    m_stageBuffer, m_textureImage, static_cast<uint32_t>( texWidth ), static_cast<uint32_t>( texHeight ) );
   transitionImageLayout( m_textureImage,
                          VK_FORMAT_R8G8B8A8_SRGB,
                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -1027,8 +1021,8 @@ void VulkanBase::run()
 
 void VulkanBase::createGraphicsPipeline()
 {
-  auto vertShaderCode = readFile( "D:/Github/cpp_playground/vert.spv" );
-  auto fragShaderCode = readFile( "D:/Github/cpp_playground/frag.spv" );
+  auto vertShaderCode = readFile( "F:/github/cpp_playground/vert.spv" );
+  auto fragShaderCode = readFile( "F:/github/cpp_playground/frag.spv" );
 
   auto vertModule = createShaderModule( vertShaderCode );
   auto fragModule = createShaderModule( fragShaderCode );
@@ -1222,30 +1216,45 @@ void VulkanBase::createInstance()
 
 void VulkanBase::initWindow()
 {
-  glfwInit();
+  if ( SDL_Init( SDL_INIT_VIDEO | SDL_INIT_EVENTS ) != 0 )
+  {
+    spdlog::error( "SDL_Init Error: {}", SDL_GetError() );
+    throw std::runtime_error( "SDL_Init failed" );
+  }
 
-  glfwWindowHint( GLFW_CLIENT_API, GLFW_NO_API );
-  glfwWindowHint( GLFW_RESIZABLE, GLFW_TRUE );
+  if ( SDL_Vulkan_LoadLibrary( nullptr ) != 0 )
+  {
+    spdlog::error( "SDL Vulkan load failed: {}", SDL_GetError() );
+    throw std::runtime_error( "could not load lib vulkan" );
+  }
 
-  window = glfwCreateWindow( 800, 800, "Vulkan", nullptr, nullptr );
-
-  glfwSetWindowUserPointer( window, this );
-
-  glfwSetWindowSizeCallback( window, []( GLFWwindow* window, int w, int h ) {
-    VulkanBase* app = reinterpret_cast<VulkanBase*>( glfwGetWindowUserPointer( window ) );
-    vkDeviceWaitIdle( app->m_device );
-    app->recreateSwapchain();
-  } );
+  window = SDL_CreateWindow( "Vulkan Window",
+                             SDL_WINDOWPOS_CENTERED,
+                             SDL_WINDOWPOS_CENTERED,
+                             400,
+                             400,
+                             SDL_WINDOW_VULKAN | SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE );
 }
 
 void VulkanBase::drawFrame()
 {
   vkWaitForFences( m_device, 1, &m_inFlightFences.at( m_currentFrame ), VK_TRUE, UINT64_MAX );
-  vkResetFences( m_device, 1, &m_inFlightFences.at( m_currentFrame ) );
 
   uint32_t imageIndex;
-  vkAcquireNextImageKHR(
+  auto result = vkAcquireNextImageKHR(
     m_device, m_swapChain, UINT64_MAX, m_imageAvailableSemaphores.at( m_currentFrame ), VK_NULL_HANDLE, &imageIndex );
+
+  if ( result == VK_ERROR_OUT_OF_DATE_KHR )
+  {
+    recreateSwapchain();
+    return;
+  }
+  else if ( result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR )
+  {
+    throw std::runtime_error( "failed to acquire swap chain image!" );
+  }
+
+  vkResetFences( m_device, 1, &m_inFlightFences.at( m_currentFrame ) );
 
   updateUniformBuffer( imageIndex );
 
@@ -1290,14 +1299,27 @@ void VulkanBase::drawFrame()
 
 void VulkanBase::mainLoop()
 {
-  while ( !glfwWindowShouldClose( window ) )
+  while ( m_running )
   {
-    glfwPollEvents();
     drawFrame();
-    if ( glfwGetKey( window, GLFW_KEY_ESCAPE ) == GLFW_PRESS )
+    SDL_Event e;
+    SDL_PollEvent( &e );
+    switch ( e.type )
     {
-      spdlog::info( "closing app" );
-      glfwSetWindowShouldClose( window, true );
+    case SDL_KEYDOWN:
+      if ( e.key.keysym.scancode == SDL_SCANCODE_DELETE )
+      {
+        m_running = false;
+      }
+      break;
+    case SDL_WINDOWEVENT:
+      if ( e.window.event == SDL_WINDOWEVENT_RESIZED )
+      {
+        recreateSwapchain();
+      }
+      break;
+    case SDL_QUIT:
+      m_running = false;
     }
   }
   vkDeviceWaitIdle( m_device );
@@ -1423,23 +1445,21 @@ void VulkanBase::cleanup()
 
   vkDestroySurfaceKHR( m_instance, m_surface, nullptr );
   vkDestroyInstance( m_instance, nullptr );
-  glfwDestroyWindow( window );
+  SDL_DestroyWindow( window );
 
-  glfwTerminate();
+  SDL_Quit();
 }
 
 auto VulkanBase::getRequiredExtensions() -> std::vector<const char*>
 {
-  uint32_t glfwExtensionCount = 0;
-  const char** glfwExtensions;
-  glfwExtensions = glfwGetRequiredInstanceExtensions( &glfwExtensionCount );
-
-  std::vector<const char*> extensions( glfwExtensions, glfwExtensions + glfwExtensionCount );
+  uint32_t extensionCount{ 0u };
+  SDL_Vulkan_GetInstanceExtensions( window, &extensionCount, nullptr );
+  spdlog::info( extensionCount );
+  std::vector<const char*> extensions( extensionCount );
+  SDL_Vulkan_GetInstanceExtensions( window, &extensionCount, extensions.data() );
 
   if ( enableValidationLayers )
-  {
     extensions.push_back( VK_EXT_DEBUG_UTILS_EXTENSION_NAME );
-  }
 
   return extensions;
 }

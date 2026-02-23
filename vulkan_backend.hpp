@@ -1,8 +1,10 @@
 #pragma once
 #include <array>
 #include <glm/glm.hpp>
-#define GLFW_INCLUDE_VULKAN
-#include <GLFW/glfw3.h>
+// #define GLFW_INCLUDE_VULKAN
+// #include <GLFW/glfw3.h>
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_vulkan.h>
 #include <spdlog/spdlog.h>
 #include <vulkan/vulkan.h>
 
@@ -248,7 +250,7 @@ public:
   }
 
 private:
-  GLFWwindow* window;
+  SDL_Window* window;
   VkInstance m_instance;
   VkDebugUtilsMessengerEXT debugMessenger;
 
@@ -304,4 +306,6 @@ private:
   VkDescriptorPool m_descriptorPool;
   std::vector<VkDescriptorSet> m_descriptorSets;
   uint32_t m_currentFrame{ 0u };
+
+  bool m_running{ true };
 };

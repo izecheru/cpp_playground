@@ -1,4 +1,5 @@
-﻿#include <iostream>
+﻿#define SDL_MAIN_HANDLED
+#include <iostream>
 #include "vulkan_backend.hpp"
 
 int main()
@@ -10,7 +11,7 @@ int main()
   }
   catch ( std::exception& e )
   {
-    std::cout << "something went wrong" << e.what();
+    std::cout << "something went wrong: exception-> " << e.what();
   }
   return 0;
 }
