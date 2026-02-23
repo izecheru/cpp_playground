@@ -1,16 +1,12 @@
 ﻿#include <iostream>
-#include "vulkan_device/vulkan_device.hpp"
-#include "vulkan_swapchain/vulkan_swapchain.hpp"
+#include "vulkan_backend.hpp"
 
 int main()
 {
   try
   {
-    const auto& vulkanDevice = VulkanDevice::getInstance();
-    vulkanDevice->init();
-    std::unique_ptr<VulkanSwapchain> swapchain = std::make_unique<VulkanSwapchain>( vulkanDevice );
-    swapchain.reset();
-    vulkanDevice->shutdown();
+    VulkanBase base{};
+    base.run();
   }
   catch ( std::exception& e )
   {

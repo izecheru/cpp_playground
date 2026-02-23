@@ -6,6 +6,8 @@
 #include <spdlog/spdlog.h>
 #include <vulkan/vulkan.h>
 
+#define MAX_FRAMES_IN_FLIGHT 3
+
 struct UniformBufferoObject
 {
   glm::mat4 model;
@@ -15,42 +17,54 @@ struct UniformBufferoObject
 
 struct Vertex
 {
-  glm::vec2 pos;
+  glm::vec3 pos;
   glm::vec3 color;
+  glm::vec2 texCoord;
 
   static VkVertexInputBindingDescription getBindingDescription()
   {
-    VkVertexInputBindingDescription bindingDescription{
-      .binding = 0, .stride = sizeof( Vertex ), .inputRate = VK_VERTEX_INPUT_RATE_VERTEX };
+    VkVertexInputBindingDescription bindingDescription{};
+    bindingDescription.binding = 0;
+    bindingDescription.stride = sizeof( Vertex );
+    bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
     return bindingDescription;
   }
 
-  static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescriptions()
+  static std::array<VkVertexInputAttributeDescription, 3> getAttributeDescriptions()
   {
-    std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
+    std::array<VkVertexInputAttributeDescription, 3> attributeDescriptions{};
 
     attributeDescriptions[0].binding = 0;
     attributeDescriptions[0].location = 0;
-    attributeDescriptions[0].format = VK_FORMAT_R32G32_SFLOAT;
+    attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
     attributeDescriptions[0].offset = offsetof( Vertex, pos );
 
     attributeDescriptions[1].binding = 0;
     attributeDescriptions[1].location = 1;
-    attributeDescriptions[1].format = VK_FORMAT_R32G32_SFLOAT;
+    attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
     attributeDescriptions[1].offset = offsetof( Vertex, color );
+
+    attributeDescriptions[2].binding = 0;
+    attributeDescriptions[2].location = 2;
+    attributeDescriptions[2].format = VK_FORMAT_R32G32_SFLOAT;
+    attributeDescriptions[2].offset = offsetof( Vertex, texCoord );
 
     return attributeDescriptions;
   }
 };
 
-const std::vector<Vertex> vertices = { { { -0.5f, -0.5f }, { 1.0f, 0.0f, 0.0f } },
-                                       { { 0.5f, -0.5f }, { 0.0f, 1.0f, 0.0f } },
-                                       { { 0.5f, 0.5f }, { 0.0f, 0.0f, 1.0f } },
-                                       { { -0.5f, 0.5f }, { 1.0f, 1.0f, 1.0f } } };
+const std::vector<Vertex> vertices = { { { -0.5f, -0.5f, 0.0f }, { 1.0f, 0.0f, 0.0f }, { 0.0f, 0.0f } },
+                                       { { 0.5f, -0.5f, 0.0f }, { 0.0f, 1.0f, 0.0f }, { 1.0f, 0.0f } },
+                                       { { 0.5f, 0.5f, 0.0f }, { 0.0f, 0.0f, 1.0f }, { 1.0f, 1.0f } },
+                                       { { -0.5f, 0.5f, 0.0f }, { 1.0f, 1.0f, 1.0f }, { 0.0f, 1.0f } },
 
-const std::vector<uint16_t> indices = { 0, 1, 2, 2, 3, 0 };
+                                       { { -0.5f, -0.5f, -0.5f }, { 1.0f, 0.0f, 0.0f }, { 0.0f, 0.0f } },
+                                       { { 0.5f, -0.5f, -0.5f }, { 0.0f, 1.0f, 0.0f }, { 1.0f, 0.0f } },
+                                       { { 0.5f, 0.5f, -0.5f }, { 0.0f, 0.0f, 1.0f }, { 1.0f, 1.0f } },
+                                       { { -0.5f, 0.5f, -0.5f }, { 1.0f, 1.0f, 1.0f }, { 0.0f, 1.0f } } };
 
+const std::vector<uint16_t> indices = { 0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4 };
 const std::vector<const char*> validationLayers = { "VK_LAYER_KHRONOS_validation" };
 const std::vector<const char*> deviceExtensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME,
                                                     VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME };
@@ -85,7 +99,24 @@ public:
   void createVertexBuffer();
   void createIndexBuffer();
 
+  // generic buffer funcs
+  auto beginSingleTimeCommands() -> VkCommandBuffer;
+  void endSingleTimeCommands( VkCommandBuffer commandBuffer );
+  //_______
+
+  // images
+  void transitionImageLayout( VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout );
+  void copyBufferToImage( VkBuffer buffer, VkImage image, uint32_t width, uint32_t height );
+  void createTextureImageView();
+  void createTextureImage();
+  void createTextureSamplers();
+  //___
+
+  void updateUniformBuffer( uint32_t imageIndex );
+
   void createDescriptorSetLayout();
+  void createDescriptorPool();
+  void createDescriptorSets();
 
   void cleanSwapchain();
   void createSurface();
@@ -103,8 +134,6 @@ public:
   void createImageViews();
   void createDepthResources();
 
-  void createTexture();
-
   void createBuffer( VkDeviceSize size,
                      VkBufferUsageFlags usage,
                      VkMemoryPropertyFlags properties,
@@ -115,6 +144,8 @@ public:
 
   void run();
   void initVulkan();
+
+  void createUniformBuffers();
 
   void recordCommandBuffer( VkCommandBuffer& commandBuffer, uint32_t imageIndex );
   void createCommandBuffer();
@@ -231,9 +262,6 @@ private:
   VkSwapchainKHR m_swapChain;
   std::vector<VkImage> m_swapChainImages;
 
-  VkImage m_textureImage;
-  VkDeviceMemory m_textureImageMemory;
-
   VkImage m_detphImage;
   VkImageView m_depthView;
   VkDeviceMemory m_depthMemory;
@@ -246,12 +274,13 @@ private:
   VkPipeline m_graphicsPipeline;
 
   VkCommandPool m_commandPool;
-  VkCommandBuffer m_commandBuffer;
+  std::vector<VkCommandBuffer> m_commandBuffers;
 
   // sync
-  VkSemaphore m_imageAvailableSemaphore;
-  VkSemaphore m_renderFinishedSemaphore;
-  VkFence m_inFlightFence;
+  std::vector<VkSemaphore> m_imageAvailableSemaphores;
+  std::vector<VkSemaphore> m_renderingFinishedSemaphores;
+  std::vector<VkFence> m_inFlightFences;
+  std::vector<VkFence> m_imagesInFlight;
 
   VkBuffer m_vertexBuffer;
   VkDeviceMemory m_vertexBufferMemory;
@@ -261,4 +290,16 @@ private:
 
   VkBuffer m_stageBuffer;
   VkDeviceMemory m_stageBufferMemory;
+  VkImage m_textureImage;
+  VkDeviceMemory m_textureImageMemory;
+  VkImageView m_textureView;
+  VkSampler m_textureSampler;
+
+  std::vector<VkBuffer> uniformBuffers;
+  std::vector<VkDeviceMemory> uniformBuffersMemory;
+  std::vector<void*> uniformBuffersMapped;
+
+  VkDescriptorPool m_descriptorPool;
+  std::vector<VkDescriptorSet> m_descriptorSets;
+  uint32_t m_currentFrame{ 0u };
 };
