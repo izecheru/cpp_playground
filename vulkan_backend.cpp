@@ -51,19 +51,19 @@ void VulkanBase::createUniformBuffers()
   VkDeviceSize bufferSize = sizeof( UniformBufferoObject );
   auto count = m_swapChainImages.size();
 
-  uniformBuffers.resize( count );
-  uniformBuffersMemory.resize( count );
-  uniformBuffersMapped.resize( count );
+  m_uniformBuffers.resize( count );
+  m_uniformBuffersMemory.resize( count );
+  m_uniformBuffersMapped.resize( count );
 
   for ( size_t i = 0; i < count; i++ )
   {
     createBuffer( bufferSize,
                   VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
                   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                  uniformBuffers[i],
-                  uniformBuffersMemory[i] );
+                  m_uniformBuffers[i],
+                  m_uniformBuffersMemory[i] );
 
-    vkMapMemory( m_device, uniformBuffersMemory[i], 0, bufferSize, 0, &uniformBuffersMapped[i] );
+    vkMapMemory( m_device, m_uniformBuffersMemory[i], 0, bufferSize, 0, &m_uniformBuffersMapped[i] );
   }
 }
 
@@ -90,7 +90,7 @@ void VulkanBase::recordCommandBuffer( VkCommandBuffer& cmd, uint32_t imageIndex 
   depthBarrier.newLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
   depthBarrier.srcAccessMask = 0;
   depthBarrier.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-  depthBarrier.image = m_detphImage;
+  depthBarrier.image = m_depthImage;
   depthBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
   depthBarrier.subresourceRange.levelCount = 1;
   depthBarrier.subresourceRange.layerCount = 1;
@@ -241,6 +241,32 @@ void VulkanBase::copyBuffer( VkBuffer src, VkBuffer dst, VkDeviceSize size )
   endSingleTimeCommands( commandBuffer );
 }
 
+void VulkanBase::recreateSwapchain()
+{
+  int width = 0, height = 0;
+  while ( width == 0 || height == 0 )
+  {
+    glfwGetFramebufferSize( window, &width, &height );
+    glfwWaitEvents();
+  }
+
+  vkDeviceWaitIdle( m_device );
+
+  cleanSwapchain();
+
+  createSwapChain();
+  createImageViews();
+  createDepthResources();
+
+  createUniformBuffers();
+  createDescriptorPool();
+  createDescriptorSets();
+
+  createGraphicsPipeline();
+
+  createCommandBuffer();
+}
+
 void VulkanBase::createVertexBuffer()
 {
   VkDeviceSize bufferSize = sizeof( vertices[0] ) * vertices.size();
@@ -308,7 +334,7 @@ void VulkanBase::updateUniformBuffer( uint32_t imageIndex )
     glm::perspective( glm::radians( 65.0f ), m_swapChainExtent.width / (float)m_swapChainExtent.height, 0.1f, 10.0f );
   ubo.proj[1][1] *= -1;
 
-  memcpy( uniformBuffersMapped[imageIndex], &ubo, sizeof( ubo ) );
+  memcpy( m_uniformBuffersMapped[imageIndex], &ubo, sizeof( ubo ) );
 }
 
 void VulkanBase::createDescriptorSetLayout()
@@ -484,7 +510,7 @@ void VulkanBase::createDescriptorSets()
   for ( size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++ )
   {
     VkDescriptorBufferInfo bufferInfo{};
-    bufferInfo.buffer = uniformBuffers[i];
+    bufferInfo.buffer = m_uniformBuffers[i];
     bufferInfo.offset = 0;
     bufferInfo.range = sizeof( UniformBufferoObject );
 
@@ -518,14 +544,21 @@ void VulkanBase::createDescriptorSets()
 
 void VulkanBase::cleanSwapchain()
 {
-  for ( auto i = 0u; i < 2; i++ )
+  vkDeviceWaitIdle( m_device );
+
+  // destroy depth image
+  vkDestroyImageView( m_device, m_depthView, nullptr );
+  vkDestroyImage( m_device, m_depthImage, nullptr );
+  vkFreeMemory( m_device, m_depthMemory, nullptr );
+
+  // destroy uniform buffers
+  for ( auto i = 0u; i < m_uniformBuffers.size(); i++ )
   {
-    vkDestroySemaphore( m_device, m_imageAvailableSemaphores.at( i ), nullptr );
-    vkDestroySemaphore( m_device, m_renderingFinishedSemaphores.at( i ), nullptr );
-    vkDestroyFence( m_device, m_inFlightFences.at( i ), nullptr );
+    vkDestroyBuffer( m_device, m_uniformBuffers.at( i ), nullptr );
+    vkFreeMemory( m_device, m_uniformBuffersMemory.at( i ), nullptr );
   }
 
-  vkDestroyCommandPool( m_device, m_commandPool, nullptr );
+  vkDestroyDescriptorPool( m_device, m_descriptorPool, nullptr );
 
   vkDestroyPipeline( m_device, m_graphicsPipeline, nullptr );
   vkDestroyPipelineLayout( m_device, m_pipelineLayout, nullptr );
@@ -859,10 +892,10 @@ void VulkanBase::createDepthResources()
                VK_IMAGE_TILING_OPTIMAL,
                VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-               m_detphImage,
+               m_depthImage,
                m_depthMemory );
 
-  m_depthView = createImageView( m_detphImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT );
+  m_depthView = createImageView( m_depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT );
 }
 
 void VulkanBase::createTextureImage()
@@ -1200,13 +1233,8 @@ void VulkanBase::initWindow()
 
   glfwSetWindowSizeCallback( window, []( GLFWwindow* window, int w, int h ) {
     VulkanBase* app = reinterpret_cast<VulkanBase*>( glfwGetWindowUserPointer( window ) );
-    app->cleanSwapchain();
-    app->createSwapChain();
-    app->createImageViews();
-    app->createGraphicsPipeline();
-    app->createCommandPool();
-    app->createCommandBuffer();
-    app->createSyncObj();
+    vkDeviceWaitIdle( app->m_device );
+    app->recreateSwapchain();
   } );
 }
 
@@ -1378,8 +1406,8 @@ void VulkanBase::cleanup()
 
   for ( size_t i = 0; i < 3; i++ )
   {
-    vkDestroyBuffer( m_device, uniformBuffers[i], nullptr );
-    vkFreeMemory( m_device, uniformBuffersMemory[i], nullptr );
+    vkDestroyBuffer( m_device, m_uniformBuffers[i], nullptr );
+    vkFreeMemory( m_device, m_uniformBuffersMemory[i], nullptr );
   }
 
   vkDestroyDescriptorPool( m_device, m_descriptorPool, nullptr );

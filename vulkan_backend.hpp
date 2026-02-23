@@ -96,6 +96,8 @@ struct SwapChainSupportDetails
 class VulkanBase
 {
 public:
+  void recreateSwapchain();
+
   void createVertexBuffer();
   void createIndexBuffer();
 
@@ -262,7 +264,7 @@ private:
   VkSwapchainKHR m_swapChain;
   std::vector<VkImage> m_swapChainImages;
 
-  VkImage m_detphImage;
+  VkImage m_depthImage;
   VkImageView m_depthView;
   VkDeviceMemory m_depthMemory;
 
@@ -295,9 +297,9 @@ private:
   VkImageView m_textureView;
   VkSampler m_textureSampler;
 
-  std::vector<VkBuffer> uniformBuffers;
-  std::vector<VkDeviceMemory> uniformBuffersMemory;
-  std::vector<void*> uniformBuffersMapped;
+  std::vector<VkBuffer> m_uniformBuffers;
+  std::vector<VkDeviceMemory> m_uniformBuffersMemory;
+  std::vector<void*> m_uniformBuffersMapped;
 
   VkDescriptorPool m_descriptorPool;
   std::vector<VkDescriptorSet> m_descriptorSets;
