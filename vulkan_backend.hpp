@@ -8,6 +8,11 @@
 #include <spdlog/spdlog.h>
 #include <vulkan/vulkan.h>
 
+#include <imgui.h>
+#include <imgui_impl_sdl2.h>
+#include <imgui_impl_vulkan.h>
+#include <imgui_internal.h>
+
 #define MAX_FRAMES_IN_FLIGHT 3
 
 struct UniformBufferoObject
@@ -98,6 +103,9 @@ struct SwapChainSupportDetails
 class VulkanBase
 {
 public:
+  void setupDockspace( ImGuiViewport* viewport );
+  void imguiBegin();
+  void initImgui();
   void recreateSwapchain();
 
   void createVertexBuffer();
@@ -147,6 +155,8 @@ public:
   void copyBuffer( VkBuffer src, VkBuffer dst, VkDeviceSize size );
 
   void run();
+  void frameRender( ImGui_ImplVulkanH_Window* wd, ImDrawData* draw_data );
+  void framePresent( ImGui_ImplVulkanH_Window* wd );
   void initVulkan();
 
   void createUniformBuffers();
@@ -157,6 +167,8 @@ public:
 
   void createGraphicsPipeline();
   auto createShaderModule( const std::vector<char>& code ) const -> VkShaderModule;
+
+  void createImguiPipeline();
 
   void createInstance();
   void initWindow();
@@ -255,12 +267,15 @@ private:
   VkDebugUtilsMessengerEXT debugMessenger;
 
   VkPhysicalDevice m_physicalDevice{ VK_NULL_HANDLE };
+  VkPhysicalDeviceProperties m_physicalDeviceProps;
+  VkPhysicalDeviceMemoryProperties m_physicalDeviceMemoryProps;
+  VkPhysicalDeviceFeatures m_physicalDeviceFeatures;
   VkDevice m_device;
 
   VkQueue m_graphicsQueue;
   VkQueue m_presentQueue;
 
-  // window surface
+  // wd surface
   VkSurfaceKHR m_surface;
 
   VkSwapchainKHR m_swapChain;
@@ -274,8 +289,12 @@ private:
   VkExtent2D m_swapChainExtent;
   std::vector<VkImageView> m_swapChainImageViews;
   VkDescriptorSetLayout m_descriptorSetLayout;
-  VkPipelineLayout m_pipelineLayout;
+
   VkPipeline m_graphicsPipeline;
+  VkPipelineLayout m_pipelineLayout;
+
+  VkPipeline m_imguiPipeline;
+  VkPipelineLayout m_imguiPipelineLayout;
 
   VkCommandPool m_commandPool;
   std::vector<VkCommandBuffer> m_commandBuffers;
@@ -304,6 +323,7 @@ private:
   std::vector<void*> m_uniformBuffersMapped;
 
   VkDescriptorPool m_descriptorPool;
+  VkDescriptorPool m_imguiPool;
   std::vector<VkDescriptorSet> m_descriptorSets;
   uint32_t m_currentFrame{ 0u };
 

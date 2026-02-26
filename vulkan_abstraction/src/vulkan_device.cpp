@@ -276,8 +276,8 @@ void VulkanDevice::createWindow()
 
   // TODO set those in a place where we can acces the swapchain funcs
   // glfwSetWindowUserPointer( m_window, this );
-  // glfwSetWindowSizeCallback( window, []( GLFWwindow* window, int w, int h ) {
-  //   VulkanBase* app = reinterpret_cast<VulkanBase*>( glfwGetWindowUserPointer( window ) );
+  // glfwSetWindowSizeCallback( wd, []( GLFWwindow* wd, int w, int h ) {
+  //   VulkanBase* app = reinterpret_cast<VulkanBase*>( glfwGetWindowUserPointer( wd ) );
   //   app->cleanSwapchain();
   //   app->createSwapChain();
   //   app->createImageViews();

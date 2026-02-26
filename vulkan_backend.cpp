@@ -13,6 +13,7 @@
 void VulkanBase::initVulkan()
 {
   initWindow();
+
   createInstance();
   setupDebug();
 
@@ -22,17 +23,15 @@ void VulkanBase::initVulkan()
 
   createSwapChain();
   createImageViews();
-  createDepthResources();
-
-  createUniformBuffers();
 
   createCommandPool();
   createCommandBuffer();
 
+  createDepthResources();
+  createUniformBuffers();
   createTextureImage();
   createTextureImageView();
   createTextureSamplers();
-
   createDescriptorSetLayout();
   createDescriptorPool();
   createDescriptorSets();
@@ -43,6 +42,7 @@ void VulkanBase::initVulkan()
   createIndexBuffer();
 
   createSyncObj();
+  initImgui();
 }
 
 void VulkanBase::createUniformBuffers()
@@ -157,6 +157,8 @@ void VulkanBase::recordCommandBuffer( VkCommandBuffer& cmd, uint32_t imageIndex 
 
   vkCmdDrawIndexed( cmd, static_cast<uint32_t>( indices.size() ), 1, 0, 0, 0 );
 
+  ImGui_ImplVulkan_RenderDrawData( ImGui::GetDrawData(), cmd );
+
   vkCmdEndRendering( cmd );
 
   barrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
@@ -236,6 +238,106 @@ void VulkanBase::copyBuffer( VkBuffer src, VkBuffer dst, VkDeviceSize size )
   vkCmdCopyBuffer( commandBuffer, src, dst, 1, &copyRegion );
 
   endSingleTimeCommands( commandBuffer );
+}
+
+void VulkanBase::setupDockspace( ImGuiViewport* viewport )
+{
+  static ImGuiDockNodeFlags dockspaceFlags = ImGuiDockNodeFlags_None | ImGuiDockNodeFlags_AutoHideTabBar;
+  if ( ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_DockingEnable )
+  {
+    const auto dockspaceId = ImGui::GetID( "MyDockspace" );
+    ImGui::DockSpace( dockspaceId, ImVec2{ 0, 0 }, dockspaceFlags );
+    if ( !std::filesystem::exists( ImGui::GetIO().IniFilename ) )
+    {
+      // Clear previous layout
+      ImGui::DockBuilderRemoveNode( dockspaceId );
+      ImGui::DockBuilderAddNode( dockspaceId, ImGuiDockNodeFlags_DockSpace );
+      ImGui::DockBuilderSetNodeSize( dockspaceId, viewport->Size );
+
+      auto centerNodeId = dockspaceId;
+      auto leftNodeId = ImGui::DockBuilderSplitNode( centerNodeId, ImGuiDir_Left, 0.2f, nullptr, &centerNodeId );
+      auto rightNodeId = ImGui::DockBuilderSplitNode( centerNodeId, ImGuiDir_Right, 0.2f, nullptr, &centerNodeId );
+      auto bottomCenterNodeId =
+        ImGui::DockBuilderSplitNode( centerNodeId, ImGuiDir_Down, 0.3f, nullptr, &centerNodeId );
+
+      auto upplerLeftNodeId = ImGui::DockBuilderSplitNode( leftNodeId, ImGuiDir_Up, 0.4f, nullptr, &leftNodeId );
+      auto lowerLeftNodeId = ImGui::DockBuilderSplitNode( leftNodeId, ImGuiDir_Up, 0.3f, nullptr, &leftNodeId );
+
+      ImGui::DockBuilderFinish( dockspaceId );
+    }
+  }
+}
+
+void VulkanBase::imguiBegin()
+{
+  ImGui_ImplVulkan_NewFrame();
+  ImGui_ImplSDL2_NewFrame();
+  ImGui::NewFrame();
+
+  static ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse |
+                                         ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                                         ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
+
+  static ImGuiViewport* viewport = ImGui::GetMainViewport();
+  static float menu_bar_height = ImGui::GetFrameHeight();
+
+  ImGui::SetNextWindowPos( ImVec2( viewport->Pos.x, viewport->Pos.y + menu_bar_height ) );
+  ImGui::SetNextWindowSize( ImVec2( viewport->Size.x, viewport->Size.y - menu_bar_height ) );
+  ImGui::SetNextWindowViewport( viewport->ID );
+
+  ImGui::PushStyleVar( ImGuiStyleVar_WindowRounding, 0.0f );
+  ImGui::PushStyleVar( ImGuiStyleVar_WindowBorderSize, 0.0f );
+
+  ImGui::Begin( "Main", nullptr, window_flags );
+  setupDockspace( viewport );
+  ImGui::PopStyleVar( 2 );
+  ImGui::End();
+}
+
+void VulkanBase::initImgui()
+{
+  VkDescriptorPoolSize pool_sizes[] = {
+    { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, IMGUI_IMPL_VULKAN_MINIMUM_IMAGE_SAMPLER_POOL_SIZE },
+  };
+  VkDescriptorPoolCreateInfo pool_info = {};
+  pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+  pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+  pool_info.maxSets = 0;
+  for ( VkDescriptorPoolSize& pool_size : pool_sizes )
+    pool_info.maxSets += pool_size.descriptorCount;
+  pool_info.poolSizeCount = (uint32_t)IM_COUNTOF( pool_sizes );
+  pool_info.pPoolSizes = pool_sizes;
+
+  IMGUI_CHECKVERSION();
+  ImGui::CreateContext();
+  ImGuiIO& io = ImGui::GetIO();
+  io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures;
+  io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard; // Enable Keyboard Controls
+  io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;  // Enable Gamepad Controls
+  io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;     // IF using Docking Branch
+
+  ImGui_ImplSDL2_InitForVulkan( window );
+
+  auto queue = findQueueFamilies( m_physicalDevice );
+  ImGui_ImplVulkan_InitInfo init_info = {};
+  init_info.Instance = m_instance;
+  init_info.PhysicalDevice = m_physicalDevice;
+  init_info.Device = m_device;
+  init_info.QueueFamily = queue.graphicsFamily.value();
+  init_info.Queue = m_graphicsQueue;
+  init_info.DescriptorPool = m_descriptorPool;
+  init_info.MinImageCount = 2;
+  init_info.ImageCount = 2;
+  init_info.UseDynamicRendering = true;
+  init_info.PipelineInfoMain.PipelineRenderingCreateInfo = { .sType =
+                                                               VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO };
+
+  init_info.PipelineInfoMain.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
+  init_info.PipelineInfoMain.PipelineRenderingCreateInfo.pColorAttachmentFormats = &m_swapChainImageFormat;
+
+  init_info.PipelineInfoMain.PipelineRenderingCreateInfo.depthAttachmentFormat = findDepthFormat();
+
+  ImGui_ImplVulkan_Init( &init_info );
 }
 
 void VulkanBase::recreateSwapchain()
@@ -365,13 +467,14 @@ void VulkanBase::createDescriptorPool()
 {
   std::array<VkDescriptorPoolSize, 2> poolSizes{
     VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, MAX_FRAMES_IN_FLIGHT },
-    VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_FRAMES_IN_FLIGHT } };
+    VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_FRAMES_IN_FLIGHT * 2 } };
 
   VkDescriptorPoolCreateInfo poolInfo{};
   poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+  poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
   poolInfo.poolSizeCount = static_cast<uint32_t>( poolSizes.size() );
   poolInfo.pPoolSizes = poolSizes.data();
-  poolInfo.maxSets = static_cast<uint32_t>( MAX_FRAMES_IN_FLIGHT );
+  poolInfo.maxSets = static_cast<uint32_t>( MAX_FRAMES_IN_FLIGHT ) * 2;
 
   if ( vkCreateDescriptorPool( m_device, &poolInfo, nullptr, &m_descriptorPool ) != VK_SUCCESS )
   {
@@ -686,11 +789,10 @@ void VulkanBase::pickPhysicalDevice()
 
 bool VulkanBase::isDeviceSuitable( VkPhysicalDevice& device )
 {
-  VkPhysicalDeviceProperties deviceProperties;
-  VkPhysicalDeviceFeatures deviceFeatures;
   // get the device features and properties
-  vkGetPhysicalDeviceProperties( device, &deviceProperties );
-  vkGetPhysicalDeviceFeatures( device, &deviceFeatures );
+  vkGetPhysicalDeviceProperties( device, &m_physicalDeviceProps );
+  vkGetPhysicalDeviceFeatures( device, &m_physicalDeviceFeatures );
+  vkGetPhysicalDeviceMemoryProperties( device, &m_physicalDeviceMemoryProps );
   auto indices = findQueueFamilies( device );
   auto extensionsSupported = checkDeviceExtensionSupport( device );
 
@@ -702,8 +804,8 @@ bool VulkanBase::isDeviceSuitable( VkPhysicalDevice& device )
     swapChainAdequate = !swapChainSupport.formats.empty() && !swapChainSupport.presentModes.empty();
   }
 
-  if ( deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU && deviceFeatures.geometryShader &&
-       indices.isComplete() && extensionsSupported && swapChainAdequate )
+  if ( m_physicalDeviceProps.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU &&
+       m_physicalDeviceFeatures.geometryShader && indices.isComplete() && extensionsSupported && swapChainAdequate )
     return true;
 
   return false;
@@ -1004,7 +1106,7 @@ auto VulkanBase::chooseSwapSurfaceFormat( const std::vector<VkSurfaceFormatKHR>&
 {
   for ( const auto& availableFormat : availableFormats )
   {
-    if ( availableFormat.format == VK_FORMAT_B8G8R8A8_SRGB &&
+    if ( availableFormat.format == VK_FORMAT_B8G8R8A8_UNORM &&
          availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR )
     {
       return availableFormat;
@@ -1165,6 +1267,138 @@ auto VulkanBase::createShaderModule( const std::vector<char>& code ) const -> Vk
   return shaderModule;
 }
 
+void VulkanBase::createImguiPipeline()
+{
+  auto vertShaderCode = readFile( "F:/github/cpp_playground/vulkan/glsl_shader.vert.u32" );
+  auto fragShaderCode = readFile( "F:/github/cpp_playground/vulkan/glsl_shader.frag.u32" );
+
+  auto vertModule = createShaderModule( vertShaderCode );
+  auto fragModule = createShaderModule( fragShaderCode );
+
+  VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
+  vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+  vertShaderStageInfo.module = vertModule;
+  vertShaderStageInfo.pName = "main";
+
+  VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
+  fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+  fragShaderStageInfo.module = fragModule;
+  fragShaderStageInfo.pName = "main";
+
+  VkPipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo, fragShaderStageInfo };
+
+  auto bindingDesc = Vertex::getBindingDescription();
+  auto attribDesc = Vertex::getAttributeDescriptions();
+
+  VkPipelineVertexInputStateCreateInfo vertexInputInfo{
+    .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+    .vertexBindingDescriptionCount = 1,
+    .pVertexBindingDescriptions = &bindingDesc,
+    .vertexAttributeDescriptionCount = static_cast<uint32_t>( attribDesc.size() ),
+    .pVertexAttributeDescriptions = attribDesc.data(),
+  };
+
+  VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+  inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+  inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+  inputAssembly.primitiveRestartEnable = VK_FALSE;
+
+  VkPipelineViewportStateCreateInfo viewportState{};
+  viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+  viewportState.viewportCount = 1;
+  viewportState.scissorCount = 1;
+
+  VkPipelineRasterizationStateCreateInfo rasterizer{};
+  rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+  rasterizer.depthClampEnable = VK_FALSE;
+  rasterizer.rasterizerDiscardEnable = VK_FALSE;
+  rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+  rasterizer.lineWidth = 1.0f;
+  rasterizer.cullMode = VK_CULL_MODE_NONE;
+  rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+  rasterizer.depthBiasEnable = VK_FALSE;
+
+  VkPipelineMultisampleStateCreateInfo multisampling{};
+  multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+  multisampling.sampleShadingEnable = VK_FALSE;
+  multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+  VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+  colorBlendAttachment.colorWriteMask =
+    VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+  colorBlendAttachment.blendEnable = VK_FALSE;
+
+  VkPipelineColorBlendStateCreateInfo colorBlending{};
+  colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+  colorBlending.logicOpEnable = VK_FALSE;
+  colorBlending.logicOp = VK_LOGIC_OP_COPY;
+  colorBlending.attachmentCount = 1;
+  colorBlending.pAttachments = &colorBlendAttachment;
+  colorBlending.blendConstants[0] = 0.0f;
+  colorBlending.blendConstants[1] = 0.0f;
+  colorBlending.blendConstants[2] = 0.0f;
+  colorBlending.blendConstants[3] = 0.0f;
+
+  std::vector<VkDynamicState> dynamicStates = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+  VkPipelineDynamicStateCreateInfo dynamicState{};
+  dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+  dynamicState.dynamicStateCount = static_cast<uint32_t>( dynamicStates.size() );
+  dynamicState.pDynamicStates = dynamicStates.data();
+
+  VkPipelineLayoutCreateInfo pipelineLayoutInfo{ .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+                                                 .setLayoutCount = 1,
+                                                 .pSetLayouts = &m_descriptorSetLayout };
+
+  if ( vkCreatePipelineLayout( m_device, &pipelineLayoutInfo, nullptr, &m_imguiPipelineLayout ) != VK_SUCCESS )
+  {
+    throw std::runtime_error( "failed to create pipeline layout!" );
+  }
+
+  VkPipelineRenderingCreateInfo renderingInfo{};
+  renderingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+  renderingInfo.colorAttachmentCount = 1;
+  renderingInfo.pColorAttachmentFormats = &m_swapChainImageFormat;
+  renderingInfo.depthAttachmentFormat = findDepthFormat();
+  renderingInfo.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
+
+  VkPipelineDepthStencilStateCreateInfo depthStencil{ .sType =
+                                                        VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+                                                      .depthTestEnable = VK_TRUE,
+                                                      .depthWriteEnable = VK_TRUE,
+                                                      .depthCompareOp = VK_COMPARE_OP_LESS,
+                                                      .depthBoundsTestEnable = VK_FALSE,
+                                                      .stencilTestEnable = VK_FALSE };
+
+  VkGraphicsPipelineCreateInfo pipelineInfo{
+    .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+    .pNext = &renderingInfo,
+    .stageCount = 2,
+    .pStages = shaderStages,
+    .pVertexInputState = &vertexInputInfo,
+    .pInputAssemblyState = &inputAssembly,
+    .pViewportState = &viewportState,
+    .pRasterizationState = &rasterizer,
+    .pMultisampleState = &multisampling,
+    .pDepthStencilState = &depthStencil,
+    .pColorBlendState = &colorBlending,
+    .pDynamicState = &dynamicState,
+    .layout = m_pipelineLayout,
+    .renderPass = VK_NULL_HANDLE,
+    .subpass = 0,
+    .basePipelineHandle = VK_NULL_HANDLE,
+  };
+
+  if ( vkCreateGraphicsPipelines( m_device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_imguiPipeline ) !=
+       VK_SUCCESS )
+  {
+    throw std::runtime_error( "failed to create graphics pipeline!" );
+  }
+  vkDestroyShaderModule( m_device, vertModule, nullptr );
+  vkDestroyShaderModule( m_device, fragModule, nullptr );
+}
+
 void VulkanBase::createInstance()
 {
   if ( enableValidationLayers && !checkValidationLayerSupport() )
@@ -1228,12 +1462,8 @@ void VulkanBase::initWindow()
     throw std::runtime_error( "could not load lib vulkan" );
   }
 
-  window = SDL_CreateWindow( "Vulkan Window",
-                             SDL_WINDOWPOS_CENTERED,
-                             SDL_WINDOWPOS_CENTERED,
-                             400,
-                             400,
-                             SDL_WINDOW_VULKAN | SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE );
+  window =
+    SDL_CreateWindow( "kogayonon", 100, 100, 800, 800, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_SHOWN );
 }
 
 void VulkanBase::drawFrame()
@@ -1255,11 +1485,8 @@ void VulkanBase::drawFrame()
   }
 
   vkResetFences( m_device, 1, &m_inFlightFences.at( m_currentFrame ) );
-
   updateUniformBuffer( imageIndex );
-
-  vkResetCommandBuffer( m_commandBuffers.at( m_currentFrame ), 0 );
-
+  // vkResetCommandBuffer( m_commandBuffers.at( m_currentFrame ), 0 );
   recordCommandBuffer( m_commandBuffers.at( m_currentFrame ), imageIndex );
 
   VkSubmitInfo submitInfo{};
@@ -1301,27 +1528,44 @@ void VulkanBase::mainLoop()
 {
   while ( m_running )
   {
+    imguiBegin();
+    ImGui::Begin( "Viewport" );
+    static auto viewportDescriptorSet =
+      ImGui_ImplVulkan_AddTexture( m_textureSampler, m_textureView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
+    ImVec2 viewportPanelSize = ImGui::GetContentRegionAvail();
+    ImGui::Image( viewportDescriptorSet, ImVec2{ viewportPanelSize.x, viewportPanelSize.y } );
+
+    ImGui::End();
+    ImGui::Begin( "Test2" );
+    ImGui::Text( "Test window 2" );
+    ImGui::End();
+
+    ImGui::Render();
     drawFrame();
     SDL_Event e;
-    SDL_PollEvent( &e );
-    switch ( e.type )
+    while ( SDL_PollEvent( &e ) )
     {
-    case SDL_KEYDOWN:
-      if ( e.key.keysym.scancode == SDL_SCANCODE_DELETE )
+      ImGui_ImplSDL2_ProcessEvent( &e );
+      switch ( e.type )
       {
+      case SDL_KEYDOWN:
+        if ( e.key.keysym.scancode == SDL_SCANCODE_DELETE )
+        {
+          m_running = false;
+        }
+        break;
+      case SDL_WINDOWEVENT:
+        if ( e.window.event == SDL_WINDOWEVENT_RESIZED )
+        {
+          recreateSwapchain();
+        }
+        break;
+      case SDL_QUIT:
         m_running = false;
       }
-      break;
-    case SDL_WINDOWEVENT:
-      if ( e.window.event == SDL_WINDOWEVENT_RESIZED )
-      {
-        recreateSwapchain();
-      }
-      break;
-    case SDL_QUIT:
-      m_running = false;
     }
   }
+
   vkDeviceWaitIdle( m_device );
 }
 
@@ -1415,6 +1659,10 @@ auto VulkanBase::findQueueFamilies( VkPhysicalDevice& device ) -> QueueFamilyInd
 
 void VulkanBase::cleanup()
 {
+  ImGui_ImplVulkan_Shutdown();
+  ImGui_ImplSDL2_Shutdown();
+  ImGui::DestroyContext();
+
   cleanSwapchain();
   vkDestroyBuffer( m_device, m_vertexBuffer, nullptr );
   vkFreeMemory( m_device, m_vertexBufferMemory, nullptr );
