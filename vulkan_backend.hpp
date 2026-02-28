@@ -15,6 +15,13 @@
 
 #define MAX_FRAMES_IN_FLIGHT 3
 
+struct Viewport
+{
+  VkImage image;
+  VkImageView imageView;
+  VkDeviceMemory memory;
+};
+
 struct UniformBufferoObject
 {
   glm::mat4 model;
@@ -103,6 +110,7 @@ struct SwapChainSupportDetails
 class VulkanBase
 {
 public:
+  void createViewport();
   void setupDockspace( ImGuiViewport* viewport );
   void imguiBegin();
   void initImgui();
@@ -326,6 +334,8 @@ private:
   VkDescriptorPool m_imguiPool;
   std::vector<VkDescriptorSet> m_descriptorSets;
   uint32_t m_currentFrame{ 0u };
+
+  Viewport m_viewport;
 
   bool m_running{ true };
 };

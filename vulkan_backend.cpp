@@ -28,6 +28,7 @@ void VulkanBase::initVulkan()
   createCommandBuffer();
 
   createDepthResources();
+  createViewport();
   createUniformBuffers();
   createTextureImage();
   createTextureImageView();
@@ -70,27 +71,29 @@ void VulkanBase::recordCommandBuffer( VkCommandBuffer& cmd, uint32_t imageIndex 
   beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   vkBeginCommandBuffer( cmd, &beginInfo );
 
-  VkImageMemoryBarrier barrier{};
-  barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-  barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-  barrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-  barrier.srcAccessMask = 0;
-  barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-  barrier.image = m_swapChainImages[imageIndex];
-  barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-  barrier.subresourceRange.levelCount = 1;
-  barrier.subresourceRange.layerCount = 1;
+  VkImageMemoryBarrier textureToColor = {};
+  textureToColor.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  textureToColor.srcAccessMask = 0;
+  textureToColor.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  textureToColor.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  textureToColor.subresourceRange.levelCount = 1;
+  textureToColor.subresourceRange.layerCount = 1;
 
-  VkImageMemoryBarrier depthBarrier{};
+  textureToColor.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  textureToColor.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  textureToColor.image = m_viewport.image;
+
+  VkImageMemoryBarrier depthBarrier = {};
   depthBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-  depthBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-  depthBarrier.newLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
   depthBarrier.srcAccessMask = 0;
   depthBarrier.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-  depthBarrier.image = m_depthImage;
   depthBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
   depthBarrier.subresourceRange.levelCount = 1;
   depthBarrier.subresourceRange.layerCount = 1;
+
+  depthBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  depthBarrier.newLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+  depthBarrier.image = m_depthImage;
 
   vkCmdPipelineBarrier( cmd,
                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
@@ -101,7 +104,7 @@ void VulkanBase::recordCommandBuffer( VkCommandBuffer& cmd, uint32_t imageIndex 
                         0,
                         nullptr,
                         1,
-                        &barrier );
+                        &textureToColor );
 
   vkCmdPipelineBarrier( cmd,
                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
@@ -122,20 +125,20 @@ void VulkanBase::recordCommandBuffer( VkCommandBuffer& cmd, uint32_t imageIndex 
                                              .clearValue = { .depthStencil = { 1.f, 0 } } };
 
   VkRenderingAttachmentInfo colorAttachment{ .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-                                             .imageView = m_swapChainImageViews[imageIndex],
+                                             //.imageView = m_swapChainImageViews[imageIndex],
+                                             .imageView = m_viewport.imageView,
                                              .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                                              .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
                                              .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
                                              .clearValue = { { 0.f, 0.f, 0.f, 1.f } } };
 
-  VkRenderingInfo renderingInfo{
-    .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-    .renderArea = { { 0, 0 }, m_swapChainExtent },
-    .layerCount = 1,
-    .colorAttachmentCount = 1,
-    .pColorAttachments = &colorAttachment,
-    .pDepthAttachment = &depthAttachment,
-  };
+  VkRenderingInfo renderingInfo = {};
+  renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+  renderingInfo.renderArea = { { 0, 0 }, m_swapChainExtent };
+  renderingInfo.layerCount = 1;
+  renderingInfo.colorAttachmentCount = 1;
+  renderingInfo.pColorAttachments = &colorAttachment;
+  renderingInfo.pDepthAttachment = &depthAttachment;
 
   vkCmdBeginRendering( cmd, &renderingInfo );
 
@@ -157,15 +160,33 @@ void VulkanBase::recordCommandBuffer( VkCommandBuffer& cmd, uint32_t imageIndex 
 
   vkCmdDrawIndexed( cmd, static_cast<uint32_t>( indices.size() ), 1, 0, 0, 0 );
 
-  ImGui_ImplVulkan_RenderDrawData( ImGui::GetDrawData(), cmd );
-
   vkCmdEndRendering( cmd );
 
-  barrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-  barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-  barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-  barrier.dstAccessMask = 0;
+  VkImageMemoryBarrier textureToShader = {};
+  textureToShader.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  textureToShader.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  textureToShader.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+  textureToShader.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  textureToShader.subresourceRange.baseMipLevel = 0;
+  textureToShader.subresourceRange.levelCount = 1;
+  textureToShader.subresourceRange.baseArrayLayer = 0;
+  textureToShader.subresourceRange.layerCount = 1;
 
+  textureToShader.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  textureToShader.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  textureToShader.image = m_viewport.image;
+
+  // Fix the pipeline stages too!
+  vkCmdPipelineBarrier( cmd,
+                        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                        0,
+                        0,
+                        nullptr,
+                        0,
+                        nullptr,
+                        1,
+                        &textureToShader );
   vkCmdPipelineBarrier( cmd,
                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
@@ -175,7 +196,95 @@ void VulkanBase::recordCommandBuffer( VkCommandBuffer& cmd, uint32_t imageIndex 
                         0,
                         nullptr,
                         1,
-                        &barrier );
+                        &textureToShader );
+
+  VkImageMemoryBarrier swapchainToColor = {};
+  swapchainToColor.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  swapchainToColor.srcAccessMask = 0;
+  swapchainToColor.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  swapchainToColor.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  swapchainToColor.subresourceRange.baseMipLevel = 0;
+  swapchainToColor.subresourceRange.levelCount = 1;
+  swapchainToColor.subresourceRange.baseArrayLayer = 0;
+  swapchainToColor.subresourceRange.layerCount = 1;
+  swapchainToColor.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  swapchainToColor.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  swapchainToColor.image = m_swapChainImages[imageIndex];
+
+  vkCmdPipelineBarrier( cmd,
+                        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                        0,
+                        0,
+                        nullptr,
+                        0,
+                        nullptr,
+                        1,
+                        &swapchainToColor );
+
+  VkRenderingAttachmentInfo imguiColorAttachment{};
+  imguiColorAttachment.imageView = m_swapChainImageViews[imageIndex];
+  imguiColorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+  VkRenderingInfo imguiRenderingInfo{};
+  imguiRenderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+  imguiRenderingInfo.renderArea = { { 0, 0 }, m_swapChainExtent };
+  imguiRenderingInfo.layerCount = 1;
+  imguiRenderingInfo.colorAttachmentCount = 1;
+  imguiRenderingInfo.pColorAttachments = &imguiColorAttachment;
+  imguiRenderingInfo.pDepthAttachment = nullptr;
+
+  vkCmdBeginRendering( cmd, &imguiRenderingInfo );
+  imguiBegin();
+  ImGui::Begin( "Viewport" );
+  static auto viewportDescriptorSet =
+    ImGui_ImplVulkan_AddTexture( m_textureSampler, m_viewport.imageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
+  ImVec2 viewportPanelSize = ImGui::GetContentRegionAvail();
+  ImGui::Image( viewportDescriptorSet, ImVec2{ viewportPanelSize.x, viewportPanelSize.y } );
+
+  ImGui::End();
+  ImGui::Begin( "Test2" );
+  ImGui::Text( "Test window 2" );
+  ImGui::End();
+
+  ImGui::Render();
+
+  ImGui_ImplVulkan_RenderDrawData( ImGui::GetDrawData(), cmd );
+  vkCmdEndRendering( cmd );
+  VkImageMemoryBarrier swapchainToPresent{};
+  swapchainToPresent.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  swapchainToPresent.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  swapchainToPresent.dstAccessMask = 0;
+  swapchainToPresent.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  swapchainToPresent.subresourceRange.baseMipLevel = 0;
+  swapchainToPresent.subresourceRange.levelCount = 1;
+  swapchainToPresent.subresourceRange.baseArrayLayer = 0;
+  swapchainToPresent.subresourceRange.layerCount = 1;
+
+  swapchainToPresent.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  swapchainToPresent.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+  swapchainToPresent.image = m_swapChainImages[imageIndex];
+
+  vkCmdPipelineBarrier( cmd,
+                        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, // src: after color attachment
+                        VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,          // dst: before present
+                        0,
+                        0,
+                        nullptr,
+                        0,
+                        nullptr,
+                        1,
+                        &swapchainToPresent );
+  vkCmdPipelineBarrier( cmd,
+                        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                        0,
+                        0,
+                        nullptr,
+                        0,
+                        nullptr,
+                        1,
+                        &swapchainToPresent );
 
   vkEndCommandBuffer( cmd );
 }
@@ -238,6 +347,20 @@ void VulkanBase::copyBuffer( VkBuffer src, VkBuffer dst, VkDeviceSize size )
   vkCmdCopyBuffer( commandBuffer, src, dst, 1, &copyRegion );
 
   endSingleTimeCommands( commandBuffer );
+}
+
+void VulkanBase::createViewport()
+{
+  createImage( m_swapChainExtent.width,
+               m_swapChainExtent.height,
+               m_swapChainImageFormat,
+               VK_IMAGE_TILING_OPTIMAL,
+               VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+               m_viewport.image,
+               m_viewport.memory );
+
+  m_viewport.imageView = createImageView( m_viewport.image, m_swapChainImageFormat, VK_IMAGE_ASPECT_COLOR_BIT );
 }
 
 void VulkanBase::setupDockspace( ImGuiViewport* viewport )
@@ -995,7 +1118,7 @@ void VulkanBase::createDepthResources()
 
 void VulkanBase::createTextureImage()
 {
-#define pic "F:/github/cpp_playground/test.jpg"
+#define pic "D:/Github/cpp_playground/test.jpg"
   int texWidth, texHeight, texChannels;
   stbi_uc* pixels = stbi_load( pic, &texWidth, &texHeight, &texChannels, STBI_rgb_alpha );
 
@@ -1123,8 +1246,8 @@ void VulkanBase::run()
 
 void VulkanBase::createGraphicsPipeline()
 {
-  auto vertShaderCode = readFile( "F:/github/cpp_playground/vert.spv" );
-  auto fragShaderCode = readFile( "F:/github/cpp_playground/frag.spv" );
+  auto vertShaderCode = readFile( "D:/Github/cpp_playground/vert.spv" );
+  auto fragShaderCode = readFile( "D:/Github/cpp_playground/frag.spv" );
 
   auto vertModule = createShaderModule( vertShaderCode );
   auto fragModule = createShaderModule( fragShaderCode );
@@ -1528,19 +1651,6 @@ void VulkanBase::mainLoop()
 {
   while ( m_running )
   {
-    imguiBegin();
-    ImGui::Begin( "Viewport" );
-    static auto viewportDescriptorSet =
-      ImGui_ImplVulkan_AddTexture( m_textureSampler, m_textureView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL );
-    ImVec2 viewportPanelSize = ImGui::GetContentRegionAvail();
-    ImGui::Image( viewportDescriptorSet, ImVec2{ viewportPanelSize.x, viewportPanelSize.y } );
-
-    ImGui::End();
-    ImGui::Begin( "Test2" );
-    ImGui::Text( "Test window 2" );
-    ImGui::End();
-
-    ImGui::Render();
     drawFrame();
     SDL_Event e;
     while ( SDL_PollEvent( &e ) )
