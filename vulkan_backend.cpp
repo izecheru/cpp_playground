@@ -125,7 +125,6 @@ void VulkanBase::recordCommandBuffer( VkCommandBuffer& cmd, uint32_t imageIndex 
                                              .clearValue = { .depthStencil = { 1.f, 0 } } };
 
   VkRenderingAttachmentInfo colorAttachment{ .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-                                             //.imageView = m_swapChainImageViews[imageIndex],
                                              .imageView = m_viewport.imageView,
                                              .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                                              .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
@@ -176,20 +175,9 @@ void VulkanBase::recordCommandBuffer( VkCommandBuffer& cmd, uint32_t imageIndex 
   textureToShader.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
   textureToShader.image = m_viewport.image;
 
-  // Fix the pipeline stages too!
   vkCmdPipelineBarrier( cmd,
                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                        0,
-                        0,
-                        nullptr,
-                        0,
-                        nullptr,
-                        1,
-                        &textureToShader );
-  vkCmdPipelineBarrier( cmd,
-                        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                        VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
                         0,
                         0,
                         nullptr,
@@ -222,9 +210,12 @@ void VulkanBase::recordCommandBuffer( VkCommandBuffer& cmd, uint32_t imageIndex 
                         1,
                         &swapchainToColor );
 
-  VkRenderingAttachmentInfo imguiColorAttachment{};
-  imguiColorAttachment.imageView = m_swapChainImageViews[imageIndex];
-  imguiColorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  VkRenderingAttachmentInfo imguiColorAttachment{ .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                                                  .imageView = m_swapChainImageViews[imageIndex],
+                                                  .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                                                  .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                                                  .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+                                                  .clearValue = { { 0.f, 0.f, 0.f, 1.f } } };
 
   VkRenderingInfo imguiRenderingInfo{};
   imguiRenderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
@@ -266,18 +257,8 @@ void VulkanBase::recordCommandBuffer( VkCommandBuffer& cmd, uint32_t imageIndex 
   swapchainToPresent.image = m_swapChainImages[imageIndex];
 
   vkCmdPipelineBarrier( cmd,
-                        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, // src: after color attachment
-                        VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,          // dst: before present
-                        0,
-                        0,
-                        nullptr,
-                        0,
-                        nullptr,
-                        1,
-                        &swapchainToPresent );
-  vkCmdPipelineBarrier( cmd,
-                        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                        VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
                         0,
                         0,
                         nullptr,
@@ -1118,7 +1099,7 @@ void VulkanBase::createDepthResources()
 
 void VulkanBase::createTextureImage()
 {
-#define pic "D:/Github/cpp_playground/test.jpg"
+#define pic "F:/github/cpp_playground/test.jpg"
   int texWidth, texHeight, texChannels;
   stbi_uc* pixels = stbi_load( pic, &texWidth, &texHeight, &texChannels, STBI_rgb_alpha );
 
@@ -1246,8 +1227,8 @@ void VulkanBase::run()
 
 void VulkanBase::createGraphicsPipeline()
 {
-  auto vertShaderCode = readFile( "D:/Github/cpp_playground/vert.spv" );
-  auto fragShaderCode = readFile( "D:/Github/cpp_playground/frag.spv" );
+  auto vertShaderCode = readFile( "F:/github/cpp_playground/vert.spv" );
+  auto fragShaderCode = readFile( "F:/github/cpp_playground/frag.spv" );
 
   auto vertModule = createShaderModule( vertShaderCode );
   auto fragModule = createShaderModule( fragShaderCode );
