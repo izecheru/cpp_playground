@@ -1,10 +1,8 @@
 #pragma once
-#include <array>
-#include <glm/glm.hpp>
-// #define GLFW_INCLUDE_VULKAN
-// #include <GLFW/glfw3.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_vulkan.h>
+#include <array>
+#include <glm/glm.hpp>
 #include <spdlog/spdlog.h>
 #include <vulkan/vulkan.h>
 
@@ -163,8 +161,6 @@ public:
   void copyBuffer( VkBuffer src, VkBuffer dst, VkDeviceSize size );
 
   void run();
-  void frameRender( ImGui_ImplVulkanH_Window* wd, ImDrawData* draw_data );
-  void framePresent( ImGui_ImplVulkanH_Window* wd );
   void initVulkan();
 
   void createUniformBuffers();
@@ -175,8 +171,6 @@ public:
 
   void createGraphicsPipeline();
   auto createShaderModule( const std::vector<char>& code ) const -> VkShaderModule;
-
-  void createImguiPipeline();
 
   void createInstance();
   void initWindow();
@@ -301,9 +295,6 @@ private:
   VkPipeline m_graphicsPipeline;
   VkPipelineLayout m_pipelineLayout;
 
-  VkPipeline m_imguiPipeline;
-  VkPipelineLayout m_imguiPipelineLayout;
-
   VkCommandPool m_commandPool;
   std::vector<VkCommandBuffer> m_commandBuffers;
 
@@ -321,6 +312,7 @@ private:
 
   VkBuffer m_stageBuffer;
   VkDeviceMemory m_stageBufferMemory;
+
   VkImage m_textureImage;
   VkDeviceMemory m_textureImageMemory;
   VkImageView m_textureView;
