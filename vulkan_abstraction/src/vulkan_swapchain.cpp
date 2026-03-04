@@ -1,10 +1,12 @@
-#include "vulkan_abstraction/vulkan_swapchain.hpp"
+#include "vulkan_swapchain.hpp"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_vulkan.h>
 #include <algorithm>
 #include <spdlog/spdlog.h>
 #include <stdexcept>
 #include "vulkan_abstraction/vulkan_device.hpp"
+#include "vulkan_abstraction/vulkan_swapchain.hpp"
+#include "vulkan_swapchain.hpp"
 
 auto VulkanSwapchain::querySwapchainSupport() -> SwapchainSupportDetails
 {
@@ -43,12 +45,62 @@ VulkanSwapchain::VulkanSwapchain( VulkanDevice* vulkanDevice, SDL_Window* wnd )
 {
   createSwapchain();
   createImageViews();
+  createCommandPool();
+  createCommandBuffers();
   createSyncObjects();
 }
 
 VulkanSwapchain::~VulkanSwapchain()
 {
   destroy();
+}
+
+auto VulkanSwapchain::getCurrentCommandBuffer() -> VkCommandBuffer&
+{
+  return m_commandBuffers.at( m_currentFrame );
+}
+
+void VulkanSwapchain::presentFrame()
+{
+  VkPresentInfoKHR presentInfo{};
+  presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+  presentInfo.waitSemaphoreCount = 1;
+  presentInfo.pWaitSemaphores = &m_swapchainImages.at( m_imageIndex ).renderingFinished;
+  presentInfo.swapchainCount = 1;
+  presentInfo.pSwapchains = &m_swapchain;
+  presentInfo.pImageIndices = &m_imageIndex;
+
+  vkQueuePresentKHR( m_pDevice->getPresentQueue().handle, &presentInfo );
+
+  m_currentFrame = ( m_currentFrame + 1 ) % 2;
+}
+
+void VulkanSwapchain::beginRendering()
+{
+  vkWaitForFences(
+    m_pDevice->getLogicalDevice(), 1, &m_swapchainImages.at( m_currentFrame ).inFlight, VK_TRUE, UINT64_MAX );
+
+  uint32_t imageIndex;
+  auto result = vkAcquireNextImageKHR( m_pDevice->getLogicalDevice(),
+                                       m_swapchain,
+                                       UINT64_MAX,
+                                       m_swapchainImages.at( m_currentFrame ).imageAvailable,
+                                       VK_NULL_HANDLE,
+                                       &imageIndex );
+
+  if ( result == VK_ERROR_OUT_OF_DATE_KHR )
+  {
+    recreateSwapchain();
+    return;
+  }
+  else if ( result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR )
+  {
+    throw std::runtime_error( "failed to acquire swap chain image!" );
+  }
+}
+
+void VulkanSwapchain::endRendering()
+{
 }
 
 void VulkanSwapchain::destroy()
@@ -163,6 +215,37 @@ void VulkanSwapchain::createImageViews()
   }
 }
 
+void VulkanSwapchain::createCommandPool()
+{
+  VkCommandPoolCreateInfo poolInfo{};
+  poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+  poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+  poolInfo.queueFamilyIndex = m_pDevice->getGraphicsQueue().familyIndex;
+  if ( vkCreateCommandPool( m_pDevice->getLogicalDevice(), &poolInfo, nullptr, &m_commandPool ) != VK_SUCCESS )
+  {
+    throw std::runtime_error( "failed to create command pool!" );
+  }
+}
+
+void VulkanSwapchain::createCommandBuffers()
+{
+  m_commandBuffers.resize( m_imageCount );
+  for ( auto i = 0u; i < m_imageCount; i++ )
+  {
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.commandPool = m_commandPool;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandBufferCount = 1;
+
+    if ( vkAllocateCommandBuffers( m_pDevice->getLogicalDevice(), &allocInfo, &m_commandBuffers.at( i ) ) !=
+         VK_SUCCESS )
+    {
+      throw std::runtime_error( "failed to allocate command buffers!" );
+    }
+  }
+}
+
 void VulkanSwapchain::createSyncObjects()
 {
   for ( auto i = 0u; i < m_imageCount; i++ )
@@ -186,39 +269,6 @@ void VulkanSwapchain::createSyncObjects()
       throw std::runtime_error( "failed to create sempahores/ fences" );
     }
   }
-}
-
-auto VulkanSwapchain::getCurrentSwapchainImage() -> SwapchainImage&
-{
-  return m_swapchainImages.at( m_currentFrame );
-}
-
-auto VulkanSwapchain::getCurrentFrame() -> uint32_t
-{
-  return m_currentFrame;
-}
-
-auto VulkanSwapchain::getSwapchainImageFormat() -> VkFormat&
-{
-  return m_swapchainFormat;
-}
-
-auto VulkanSwapchain::getSwapchain() -> VkSwapchainKHR&
-{
-  return m_swapchain;
-}
-
-auto VulkanSwapchain::getNextImageIndex() -> uint32_t
-{
-  uint32_t imageIndex{ 0u };
-
-  vkAcquireNextImageKHR( m_pDevice->getLogicalDevice(),
-                         m_swapchain,
-                         UINT64_MAX,
-                         m_swapchainImages.at( m_currentFrame ).imageAvailable,
-                         VK_NULL_HANDLE,
-                         &imageIndex );
-  return imageIndex;
 }
 
 auto VulkanSwapchain::chooseSwapExtent( const VkSurfaceCapabilitiesKHR& capabilities ) -> VkExtent2D

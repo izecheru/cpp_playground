@@ -67,6 +67,7 @@ auto VulkanDevice::findQueueFamilies( VkPhysicalDevice& device ) -> QueueFamilyI
     if ( queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT )
     {
       indices.graphicsFamily = i;
+      m_graphicsQueue.familyIndex = i;
     }
 
     VkBool32 presentSupport{ false };
@@ -75,6 +76,7 @@ auto VulkanDevice::findQueueFamilies( VkPhysicalDevice& device ) -> QueueFamilyI
     if ( presentSupport )
     {
       indices.presentFamily = i;
+      m_presentQueue.familyIndex = i;
     }
 
     // early exit if we already found a family
