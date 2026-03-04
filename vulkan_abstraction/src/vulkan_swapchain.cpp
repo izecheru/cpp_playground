@@ -1,9 +1,10 @@
-#include "vulkan_swapchain/vulkan_swapchain.hpp"
-#include <GLFW/glfw3.h>
+#include "vulkan_abstraction/vulkan_swapchain.hpp"
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_vulkan.h>
 #include <algorithm>
 #include <spdlog/spdlog.h>
 #include <stdexcept>
-#include "vulkan_device/vulkan_device.hpp"
+#include "vulkan_abstraction/vulkan_device.hpp"
 
 auto VulkanSwapchain::querySwapchainSupport() -> SwapchainSupportDetails
 {
@@ -36,13 +37,12 @@ auto VulkanSwapchain::querySwapchainSupport() -> SwapchainSupportDetails
   return details;
 }
 
-VulkanSwapchain::VulkanSwapchain( std::shared_ptr<VulkanDevice> device )
-    : m_pDevice{ device.get() }
+VulkanSwapchain::VulkanSwapchain( VulkanDevice* vulkanDevice, SDL_Window* wnd )
+    : m_pDevice{ vulkanDevice }
+    , m_window{ wnd }
 {
   createSwapchain();
   createImageViews();
-  // createRenderPass();
-  // createFramebuffers();
   createSyncObjects();
 }
 
@@ -55,15 +55,13 @@ void VulkanSwapchain::destroy()
 {
   vkDeviceWaitIdle( m_pDevice->getLogicalDevice() );
 
-  vkDestroySemaphore( m_pDevice->getLogicalDevice(), m_imageAvailableSemaphore, nullptr );
-  vkDestroySemaphore( m_pDevice->getLogicalDevice(), m_renderFinishedSemaphore, nullptr );
-  vkDestroyFence( m_pDevice->getLogicalDevice(), m_inFlightFence, nullptr );
-
-  vkDestroyRenderPass( m_pDevice->getLogicalDevice(), m_renderPass, nullptr );
-  for ( auto& fb : m_framebuffers )
+  for ( auto& entry : m_swapchainImages )
   {
-    vkDestroyFramebuffer( m_pDevice->getLogicalDevice(), fb, nullptr );
+    vkDestroySemaphore( m_pDevice->getLogicalDevice(), entry.imageAvailable, nullptr );
+    vkDestroySemaphore( m_pDevice->getLogicalDevice(), entry.renderingFinished, nullptr );
+    vkDestroyFence( m_pDevice->getLogicalDevice(), entry.inFlight, nullptr );
   }
+
   for ( auto& swapchainImage : m_swapchainImages )
   {
     vkDestroyImageView( m_pDevice->getLogicalDevice(), swapchainImage.imageView, nullptr );
@@ -74,39 +72,33 @@ void VulkanSwapchain::destroy()
 
 void VulkanSwapchain::createSwapchain()
 {
-  auto details = querySwapchainSupport();
-  auto surfaceFormat = chooseSwapSurfaceFormat( details.formats );
-  auto presentMode = chooseSwapPresentMode( details.presentModes );
-  auto extent = chooseSwapExtent( details.capabilities );
+  SwapchainSupportDetails swapchainSupport = querySwapchainSupport();
+  auto surfaceFormat = chooseSwapSurfaceFormat( swapchainSupport.formats );
+  auto presentMode = chooseSwapPresentMode( swapchainSupport.presentModes );
+  auto extent = chooseSwapExtent( swapchainSupport.capabilities );
+  m_imageCount = swapchainSupport.capabilities.minImageCount + 1;
 
-  m_width = extent.width;
-  m_height = extent.height;
-
-  uint32_t imageCount = details.capabilities.minImageCount + 1;
-  if ( details.capabilities.maxImageCount > 0 && imageCount > details.capabilities.maxImageCount )
+  if ( swapchainSupport.capabilities.maxImageCount > 0 && m_imageCount > swapchainSupport.capabilities.maxImageCount )
   {
-    imageCount = details.capabilities.maxImageCount;
+    m_imageCount = swapchainSupport.capabilities.maxImageCount;
   }
 
-  spdlog::info( "max image count {}", imageCount );
-
-  auto& surface = m_pDevice->getSurface();
   VkSwapchainCreateInfoKHR createInfo{};
   createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-  createInfo.surface = surface;
+  createInfo.surface = m_pDevice->getSurface();
 
-  createInfo.minImageCount = imageCount;
+  createInfo.minImageCount = m_imageCount;
   createInfo.imageFormat = surfaceFormat.format;
   createInfo.imageColorSpace = surfaceFormat.colorSpace;
   createInfo.imageExtent = extent;
   createInfo.imageArrayLayers = 1;
+  // we need VK_IMAGE_USAGE_TRANSFER_DST_BIT if we want to do post processing as this is a color attachment
   createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 
-  auto presentQueue = m_pDevice->getPresentQueue();
-  auto graphicsQueue = m_pDevice->getGraphicsQueue();
-  uint32_t queueFamilyIndices[] = { graphicsQueue.familyIndex, presentQueue.familyIndex };
+  uint32_t queueFamilyIndices[] = { m_pDevice->getGraphicsQueue().familyIndex,
+                                    m_pDevice->getPresentQueue().familyIndex };
 
-  if ( graphicsQueue.familyIndex != presentQueue.familyIndex )
+  if ( queueFamilyIndices[0] != queueFamilyIndices[1] )
   {
     createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
     createInfo.queueFamilyIndexCount = 2;
@@ -115,12 +107,15 @@ void VulkanSwapchain::createSwapchain()
   else
   {
     createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    createInfo.queueFamilyIndexCount = 0;
+    createInfo.pQueueFamilyIndices = nullptr;
   }
 
-  createInfo.preTransform = details.capabilities.currentTransform;
+  createInfo.preTransform = swapchainSupport.capabilities.currentTransform;
   createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
   createInfo.presentMode = presentMode;
   createInfo.clipped = VK_TRUE;
+
   createInfo.oldSwapchain = VK_NULL_HANDLE;
 
   if ( vkCreateSwapchainKHR( m_pDevice->getLogicalDevice(), &createInfo, nullptr, &m_swapchain ) != VK_SUCCESS )
@@ -128,11 +123,11 @@ void VulkanSwapchain::createSwapchain()
     throw std::runtime_error( "failed to create swap chain!" );
   }
 
-  vkGetSwapchainImagesKHR( m_pDevice->getLogicalDevice(), m_swapchain, &imageCount, nullptr );
-  m_swapchainImages.resize( imageCount );
-  std::vector<VkImage> images( imageCount );
-  vkGetSwapchainImagesKHR( m_pDevice->getLogicalDevice(), m_swapchain, &imageCount, images.data() );
-  for ( auto i = 0u; i < imageCount; i++ )
+  vkGetSwapchainImagesKHR( m_pDevice->getLogicalDevice(), m_swapchain, &m_imageCount, nullptr );
+  std::vector<VkImage> images( m_imageCount );
+  m_swapchainImages.resize( m_imageCount );
+  vkGetSwapchainImagesKHR( m_pDevice->getLogicalDevice(), m_swapchain, &m_imageCount, images.data() );
+  for ( auto i = 0u; i < m_imageCount; i++ )
   {
     m_swapchainImages.at( i ).image = images.at( i );
   }
@@ -143,7 +138,7 @@ void VulkanSwapchain::createSwapchain()
 
 void VulkanSwapchain::createImageViews()
 {
-  for ( size_t i = 0; i < m_swapchainImages.size(); i++ )
+  for ( size_t i = 0; i < m_imageCount; i++ )
   {
     VkImageViewCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -160,8 +155,8 @@ void VulkanSwapchain::createImageViews()
     createInfo.subresourceRange.baseArrayLayer = 0;
     createInfo.subresourceRange.layerCount = 1;
 
-    if ( vkCreateImageView( m_pDevice->getLogicalDevice(), &createInfo, nullptr, &m_swapchainImages[i].imageView ) !=
-         VK_SUCCESS )
+    if ( vkCreateImageView(
+           m_pDevice->getLogicalDevice(), &createInfo, nullptr, &m_swapchainImages.at( i ).imageView ) != VK_SUCCESS )
     {
       throw std::runtime_error( "failed to create image views!" );
     }
@@ -170,92 +165,59 @@ void VulkanSwapchain::createImageViews()
 
 void VulkanSwapchain::createSyncObjects()
 {
-  VkSemaphoreCreateInfo semaphoreInfo{};
-  semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-
-  VkFenceCreateInfo fenceInfo{};
-  fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-  fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-
-  if ( vkCreateSemaphore( m_pDevice->getLogicalDevice(), &semaphoreInfo, nullptr, &m_imageAvailableSemaphore ) !=
-         VK_SUCCESS ||
-       vkCreateSemaphore( m_pDevice->getLogicalDevice(), &semaphoreInfo, nullptr, &m_renderFinishedSemaphore ) !=
-         VK_SUCCESS ||
-       vkCreateFence( m_pDevice->getLogicalDevice(), &fenceInfo, nullptr, &m_inFlightFence ) != VK_SUCCESS )
+  for ( auto i = 0u; i < m_imageCount; i++ )
   {
-    throw std::runtime_error( "failed to create sempahores" );
-  }
-  spdlog::info( "created sync objects" );
-}
+    VkSemaphoreCreateInfo semaphoreInfo{};
+    semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
-void VulkanSwapchain::createFramebuffers()
-{
-  m_framebuffers.resize( m_swapchainImages.size() );
-  for ( size_t i = 0; i < m_swapchainImages.size(); i++ )
-  {
-    VkImageView attachments[] = { m_swapchainImages[i].imageView };
+    VkFenceCreateInfo fenceInfo{};
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
-    VkFramebufferCreateInfo framebufferInfo{};
-    framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-    framebufferInfo.renderPass = m_renderPass;
-    framebufferInfo.attachmentCount = 1;
-    framebufferInfo.pAttachments = attachments;
-    framebufferInfo.width = m_swapchainExtent.width;
-    framebufferInfo.height = m_swapchainExtent.height;
-    framebufferInfo.layers = 1;
-
-    if ( vkCreateFramebuffer( m_pDevice->getLogicalDevice(), &framebufferInfo, nullptr, &m_framebuffers[i] ) !=
-         VK_SUCCESS )
+    if ( vkCreateSemaphore(
+           m_pDevice->getLogicalDevice(), &semaphoreInfo, nullptr, &m_swapchainImages.at( i ).imageAvailable ) !=
+           VK_SUCCESS ||
+         vkCreateSemaphore(
+           m_pDevice->getLogicalDevice(), &semaphoreInfo, nullptr, &m_swapchainImages.at( i ).renderingFinished ) !=
+           VK_SUCCESS ||
+         vkCreateFence( m_pDevice->getLogicalDevice(), &fenceInfo, nullptr, &m_swapchainImages.at( i ).inFlight ) !=
+           VK_SUCCESS )
     {
-      throw std::runtime_error( "failed to create framebuffer!" );
+      throw std::runtime_error( "failed to create sempahores/ fences" );
     }
   }
 }
 
-// void VulkanSwapchain::createRenderPass()
-//{
-//   VkAttachmentDescription colorAttachment{};
-//   colorAttachment.format = m_swapchainFormat;
-//   colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-//   colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-//   colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-//   colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-//   colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-//   colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-//   colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-//
-//   VkAttachmentReference colorAttachmentRef{};
-//   colorAttachmentRef.attachment = 0;
-//   colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-//
-//   VkSubpassDescription subpass{};
-//   subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-//   subpass.colorAttachmentCount = 1;
-//   subpass.pColorAttachments = &colorAttachmentRef;
-//
-//   VkRenderPassCreateInfo renderPassInfo{};
-//   renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-//   renderPassInfo.attachmentCount = 1;
-//   renderPassInfo.pAttachments = &colorAttachment;
-//   renderPassInfo.subpassCount = 1;
-//   renderPassInfo.pSubpasses = &subpass;
-//
-//   if ( vkCreateRenderPass( m_pDevice->getLogicalDevice(), &renderPassInfo, nullptr, &m_renderPass ) != VK_SUCCESS )
-//   {
-//     throw std::runtime_error( "failed to create render pass!" );
-//   }
-// }
-
-auto VulkanSwapchain::getImageView( uint32_t index ) -> VkImageView
+auto VulkanSwapchain::getCurrentSwapchainImage() -> SwapchainImage&
 {
-  return m_swapchainImages.at( index ).imageView;
+  return m_swapchainImages.at( m_currentFrame );
+}
+
+auto VulkanSwapchain::getCurrentFrame() -> uint32_t
+{
+  return m_currentFrame;
+}
+
+auto VulkanSwapchain::getSwapchainImageFormat() -> VkFormat&
+{
+  return m_swapchainFormat;
+}
+
+auto VulkanSwapchain::getSwapchain() -> VkSwapchainKHR&
+{
+  return m_swapchain;
 }
 
 auto VulkanSwapchain::getNextImageIndex() -> uint32_t
 {
   uint32_t imageIndex{ 0u };
-  vkAcquireNextImageKHR(
-    m_pDevice->getLogicalDevice(), m_swapchain, UINT64_MAX, m_imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex );
+
+  vkAcquireNextImageKHR( m_pDevice->getLogicalDevice(),
+                         m_swapchain,
+                         UINT64_MAX,
+                         m_swapchainImages.at( m_currentFrame ).imageAvailable,
+                         VK_NULL_HANDLE,
+                         &imageIndex );
   return imageIndex;
 }
 
@@ -268,7 +230,7 @@ auto VulkanSwapchain::chooseSwapExtent( const VkSurfaceCapabilitiesKHR& capabili
   else
   {
     int width, height;
-    glfwGetFramebufferSize( m_pDevice->getGlfwWindow(), &width, &height );
+    SDL_GetWindowSize( m_window, &width, &height );
 
     VkExtent2D actualExtent = { static_cast<uint32_t>( width ), static_cast<uint32_t>( height ) };
 

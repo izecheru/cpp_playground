@@ -3,7 +3,7 @@
 #include <vector>
 #include <vulkan/vulkan.h>
 
-struct GLFWwindow;
+struct SDL_Window;
 
 inline const std::vector<const char*> validationLayers = { "VK_LAYER_KHRONOS_validation" };
 inline const std::vector<const char*> deviceExtensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
@@ -42,48 +42,39 @@ struct GPUQueue
 class VulkanDevice
 {
 public:
+  explicit VulkanDevice( SDL_Window* wnd );
+  ~VulkanDevice() = default;
+
   void init();
   void setupDebug();
-  void createWindow();
   void createInstance();
   void createWindowSurface();
   void pickPhysicalDevice();
   void createLogicalDevice();
   void shutdown();
 
-  static auto getGraphicsQueue() -> GPUQueue&;
-  static auto getPresentQueue() -> GPUQueue&;
-  static auto getGlfwWindow() -> GLFWwindow*;
-
-  static auto getPhysicalDevice() -> VkPhysicalDevice&;
-  static auto getLogicalDevice() -> VkDevice&;
-  static auto getSurface() -> VkSurfaceKHR&;
-
-  inline static auto getInstance() -> std::shared_ptr<VulkanDevice>
-  {
-    static auto instance = std::make_shared<VulkanDevice>();
-    return instance;
-  }
+  auto getGraphicsQueue() -> GPUQueue&;
+  auto getPresentQueue() -> GPUQueue&;
+  auto getPhysicalDevice() -> VkPhysicalDevice&;
+  auto getLogicalDevice() -> VkDevice&;
+  auto getSurface() -> VkSurfaceKHR&;
+  auto getInstance() -> VkInstance&;
 
 private:
   auto findQueueFamilies( VkPhysicalDevice& device ) -> QueueFamilyIndices;
   bool isDeviceSuitable( VkPhysicalDevice& device );
 
-  VulkanDevice() = default;
-  ~VulkanDevice() = default;
-  VulkanDevice( const VulkanDevice& ) = delete;
-  VulkanDevice& operator=( const VulkanDevice& ) = delete;
+  auto getRequiredExtensions() -> std::vector<const char*>;
 
 private:
-  static inline VulkanPlatform m_platform;
-  static inline GLFWwindow* m_window{ nullptr };
-
-  static inline VkPhysicalDeviceProperties m_physicalDeviceProps;
-  static inline VkPhysicalDeviceMemoryProperties m_physicalDeviceMemoryProps;
-  static inline VkPhysicalDeviceFeatures m_physicalDeviceFeatures;
+  SDL_Window* m_window;
+  VulkanPlatform m_platform;
+  VkPhysicalDeviceProperties m_physicalDeviceProps;
+  VkPhysicalDeviceMemoryProperties m_physicalDeviceMemoryProps;
+  VkPhysicalDeviceFeatures m_physicalDeviceFeatures;
 
   VkDebugUtilsMessengerEXT m_debugMessenger{ VK_NULL_HANDLE };
 
-  static inline GPUQueue m_presentQueue;
-  static inline GPUQueue m_graphicsQueue;
+  GPUQueue m_presentQueue;
+  GPUQueue m_graphicsQueue;
 };

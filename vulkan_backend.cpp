@@ -717,23 +717,25 @@ void VulkanBase::createDescriptorSets()
     imageInfo.imageView = m_textureView;
     imageInfo.sampler = m_textureSampler;
 
-    std::array<VkWriteDescriptorSet, 2> descriptorWrites{
-      VkWriteDescriptorSet{
-        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        .dstSet = m_descriptorSets[i],
-        .dstBinding = 0,
-        .dstArrayElement = 0,
-        .descriptorCount = 1,
-        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        .pBufferInfo = &bufferInfo,
-      },
-      VkWriteDescriptorSet{ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                            .dstSet = m_descriptorSets[i],
-                            .dstBinding = 1,
-                            .dstArrayElement = 0,
-                            .descriptorCount = 1,
-                            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                            .pImageInfo = &imageInfo } };
+    auto uniformBufferDescriptor = VkWriteDescriptorSet{
+      .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+      .dstSet = m_descriptorSets[i],
+      .dstBinding = 0,
+      .dstArrayElement = 0,
+      .descriptorCount = 1,
+      .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+      .pBufferInfo = &bufferInfo,
+    };
+
+    auto samplerDescriptor = VkWriteDescriptorSet{ .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                                   .dstSet = m_descriptorSets[i],
+                                                   .dstBinding = 1,
+                                                   .dstArrayElement = 0,
+                                                   .descriptorCount = 1,
+                                                   .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                                   .pImageInfo = &imageInfo };
+
+    std::array<VkWriteDescriptorSet, 2> descriptorWrites{ uniformBufferDescriptor, samplerDescriptor };
 
     vkUpdateDescriptorSets(
       m_device, static_cast<uint32_t>( descriptorWrites.size() ), descriptorWrites.data(), 0, nullptr );
@@ -1094,7 +1096,7 @@ void VulkanBase::createDepthResources()
 
 void VulkanBase::createTextureImage()
 {
-#define pic "F:/github/cpp_playground/test.jpg"
+#define pic "D:/Github/cpp_playground/test.jpg"
   int texWidth, texHeight, texChannels;
   stbi_uc* pixels = stbi_load( pic, &texWidth, &texHeight, &texChannels, STBI_rgb_alpha );
 
@@ -1222,8 +1224,8 @@ void VulkanBase::run()
 
 void VulkanBase::createGraphicsPipeline()
 {
-  auto vertShaderCode = readFile( "F:/github/cpp_playground/vert.spv" );
-  auto fragShaderCode = readFile( "F:/github/cpp_playground/frag.spv" );
+  auto vertShaderCode = readFile( "D:/Github/cpp_playground/vert.spv" );
+  auto fragShaderCode = readFile( "D:/Github/cpp_playground/frag.spv" );
 
   auto vertModule = createShaderModule( vertShaderCode );
   auto fragModule = createShaderModule( fragShaderCode );
@@ -1461,14 +1463,12 @@ void VulkanBase::drawFrame()
 
   VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
   submitInfo.waitSemaphoreCount = 1;
-  submitInfo.pWaitSemaphores = &m_imageAvailableSemaphores.at( m_currentFrame );
-  submitInfo.pWaitDstStageMask = waitStages;
-
-  submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &m_commandBuffers.at( m_currentFrame );
-
-  submitInfo.signalSemaphoreCount = 1;
   submitInfo.pSignalSemaphores = &m_renderingFinishedSemaphores.at( imageIndex );
+  submitInfo.pWaitSemaphores = &m_imageAvailableSemaphores.at( m_currentFrame );
+  submitInfo.pCommandBuffers = &m_commandBuffers.at( m_currentFrame );
+  submitInfo.pWaitDstStageMask = waitStages;
+  submitInfo.commandBufferCount = 1;
+  submitInfo.signalSemaphoreCount = 1;
 
   if ( vkQueueSubmit( m_graphicsQueue, 1, &submitInfo, m_inFlightFences.at( m_currentFrame ) ) != VK_SUCCESS )
   {

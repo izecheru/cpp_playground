@@ -137,12 +137,7 @@ public:
   void createDescriptorSets();
 
   void cleanSwapchain();
-  void createSurface();
   void createSyncObj();
-  void createLogicalDevice();
-  void pickPhysicalDevice();
-  bool isDeviceSuitable( VkPhysicalDevice& device );
-  bool checkDeviceExtensionSupport( VkPhysicalDevice& device );
 
   auto querySwapChainSupport( VkPhysicalDevice& device ) -> SwapChainSupportDetails;
   auto chooseSwapExtent( const VkSurfaceCapabilitiesKHR& capabilities ) -> VkExtent2D;
@@ -172,15 +167,19 @@ public:
   void createGraphicsPipeline();
   auto createShaderModule( const std::vector<char>& code ) const -> VkShaderModule;
 
-  void createInstance();
   void initWindow();
   void drawFrame();
   void mainLoop();
 
-  auto findQueueFamilies( VkPhysicalDevice& device ) -> QueueFamilyIndices;
-
   void cleanup();
 
+  void createSurface();
+  void createLogicalDevice();
+  void pickPhysicalDevice();
+  bool isDeviceSuitable( VkPhysicalDevice& device );
+  bool checkDeviceExtensionSupport( VkPhysicalDevice& device );
+  auto findQueueFamilies( VkPhysicalDevice& device ) -> QueueFamilyIndices;
+  void createInstance();
   void setupDebug();
   bool checkValidationLayerSupport();
   void populateDebugMessengerCreateInfo( VkDebugUtilsMessengerCreateInfoEXT& info );

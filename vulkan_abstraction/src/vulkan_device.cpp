@@ -1,9 +1,9 @@
-#include "vulkan_device/vulkan_device.hpp"
+#include "vulkan_abstraction/vulkan_device.hpp"
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_vulkan.h>
 #include <set>
 #include <spdlog/spdlog.h>
 #include <stdexcept>
-#define GLFW_VULKAN_INCLUDE
-#include <GLFW/glfw3.h>
 
 void DestroyDebugUtilsMessengerEXT( VkInstance instance,
                                     VkDebugUtilsMessengerEXT debugMessenger,
@@ -64,19 +64,17 @@ auto VulkanDevice::findQueueFamilies( VkPhysicalDevice& device ) -> QueueFamilyI
   for ( const auto& queueFamily : queueFamilies )
   {
     // we need to find at least one queue family that supports the graphics bit
-    if ( queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT && m_graphicsQueue.familyIndex == UINT32_MAX )
+    if ( queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT )
     {
       indices.graphicsFamily = i;
-      m_graphicsQueue.familyIndex = i;
     }
 
     VkBool32 presentSupport{ false };
     vkGetPhysicalDeviceSurfaceSupportKHR( device, i, m_platform.surface, &presentSupport );
 
-    if ( presentSupport && m_presentQueue.familyIndex == UINT32_MAX )
+    if ( presentSupport )
     {
       indices.presentFamily = i;
-      m_presentQueue.familyIndex = i;
     }
 
     // early exit if we already found a family
@@ -90,35 +88,30 @@ auto VulkanDevice::findQueueFamilies( VkPhysicalDevice& device ) -> QueueFamilyI
 
 bool VulkanDevice::isDeviceSuitable( VkPhysicalDevice& device )
 {
-  VkPhysicalDeviceProperties deviceProperties;
-  VkPhysicalDeviceFeatures deviceFeatures;
   // get the device features and properties
-  vkGetPhysicalDeviceProperties( device, &deviceProperties );
-  vkGetPhysicalDeviceFeatures( device, &deviceFeatures );
+  vkGetPhysicalDeviceProperties( device, &m_physicalDeviceProps );
+  vkGetPhysicalDeviceFeatures( device, &m_physicalDeviceFeatures );
+  vkGetPhysicalDeviceMemoryProperties( device, &m_physicalDeviceMemoryProps );
+  auto indices = findQueueFamilies( device );
   auto extensionsSupported = checkDeviceExtensionSupport( device );
-  auto families = findQueueFamilies( device );
 
-  if ( deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU && deviceFeatures.geometryShader &&
-       extensionsSupported && families.isComplete() )
-  {
+  if ( m_physicalDeviceProps.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU &&
+       m_physicalDeviceFeatures.geometryShader && indices.isComplete() && extensionsSupported )
     return true;
-  }
 
   return false;
 }
 
-auto getRequiredExtensions() -> std::vector<const char*>
+auto VulkanDevice::getRequiredExtensions() -> std::vector<const char*>
 {
-  uint32_t glfwExtensionCount = 0;
-  const char** glfwExtensions;
-  glfwExtensions = glfwGetRequiredInstanceExtensions( &glfwExtensionCount );
-
-  std::vector<const char*> extensions( glfwExtensions, glfwExtensions + glfwExtensionCount );
+  uint32_t extensionCount{ 0u };
+  SDL_Vulkan_GetInstanceExtensions( m_window, &extensionCount, nullptr );
+  spdlog::info( extensionCount );
+  std::vector<const char*> extensions( extensionCount );
+  SDL_Vulkan_GetInstanceExtensions( m_window, &extensionCount, extensions.data() );
 
   if ( enableValidationLayers )
-  {
     extensions.push_back( VK_EXT_DEBUG_UTILS_EXTENSION_NAME );
-  }
 
   return extensions;
 }
@@ -205,8 +198,6 @@ void VulkanDevice::shutdown()
   vkDestroyDevice( m_platform.device, nullptr );
   vkDestroySurfaceKHR( m_platform.instance, m_platform.surface, nullptr );
   vkDestroyInstance( m_platform.instance, nullptr );
-  glfwDestroyWindow( m_window );
-  glfwTerminate();
 }
 
 auto VulkanDevice::getGraphicsQueue() -> GPUQueue&
@@ -217,11 +208,6 @@ auto VulkanDevice::getGraphicsQueue() -> GPUQueue&
 auto VulkanDevice::getPresentQueue() -> GPUQueue&
 {
   return m_presentQueue;
-}
-
-auto VulkanDevice::getGlfwWindow() -> GLFWwindow*
-{
-  return m_window;
 }
 
 auto VulkanDevice::getPhysicalDevice() -> VkPhysicalDevice&
@@ -239,16 +225,21 @@ auto VulkanDevice::getSurface() -> VkSurfaceKHR&
   return m_platform.surface;
 }
 
+VulkanDevice::VulkanDevice( SDL_Window* wnd )
+    : m_window{ wnd }
+{
+  init();
+}
+
 void VulkanDevice::init()
 {
   spdlog::info( "initializing device" );
-  createWindow();
   createInstance();
+  setupDebug();
   createWindowSurface();
   pickPhysicalDevice();
   createLogicalDevice();
-
-  spdlog::info( "initialization finished" );
+  spdlog::info( "vulkan device initialized" );
 }
 
 void VulkanDevice::setupDebug()
@@ -262,32 +253,6 @@ void VulkanDevice::setupDebug()
   {
     throw std::runtime_error( "failed to set up debug messenger!" );
   }
-}
-
-void VulkanDevice::createWindow()
-{
-  glfwInit();
-
-  glfwWindowHint( GLFW_CLIENT_API, GLFW_NO_API );
-  glfwWindowHint( GLFW_RESIZABLE, GLFW_TRUE );
-  glfwWindowHint( GLFW_MAXIMIZED, GLFW_TRUE );
-
-  m_window = glfwCreateWindow( 800, 800, "Vulkan", nullptr, nullptr );
-
-  // TODO set those in a place where we can acces the swapchain funcs
-  // glfwSetWindowUserPointer( m_window, this );
-  // glfwSetWindowSizeCallback( wd, []( GLFWwindow* wd, int w, int h ) {
-  //   VulkanBase* app = reinterpret_cast<VulkanBase*>( glfwGetWindowUserPointer( wd ) );
-  //   app->cleanSwapchain();
-  //   app->createSwapChain();
-  //   app->createImageViews();
-  //   app->createRenderPass();
-  //   app->createGraphicsPipeline();
-  //   app->createFrameBuffers();
-  //   app->createCommandPool();
-  //   app->createCommandBuffer();
-  //   app->createSyncObj();
-  // } );
 }
 
 void VulkanDevice::createInstance()
@@ -328,20 +293,23 @@ void VulkanDevice::createInstance()
     createInfo.pNext = nullptr;
   }
 
+  for ( auto& extension : extensions )
+  {
+    spdlog::info( "extension: {}", extension );
+  }
+
   if ( vkCreateInstance( &createInfo, nullptr, &m_platform.instance ) != VK_SUCCESS )
   {
     throw std::runtime_error( "cannot create instance" );
   }
-  spdlog::info( "Created instance" );
 }
 
 void VulkanDevice::createWindowSurface()
 {
-  if ( glfwCreateWindowSurface( m_platform.instance, m_window, nullptr, &m_platform.surface ) )
+  if ( SDL_Vulkan_CreateSurface( m_window, m_platform.instance, &m_platform.surface ) != SDL_TRUE )
   {
-    throw std::runtime_error( "could not create window surface" );
+    throw std::runtime_error( "could not create surface" );
   }
-  spdlog::info( "Created window surface" );
 }
 
 void VulkanDevice::pickPhysicalDevice()
@@ -365,11 +333,10 @@ void VulkanDevice::pickPhysicalDevice()
   {
     if ( isDeviceSuitable( device ) )
     {
+      VkPhysicalDeviceProperties props;
+      vkGetPhysicalDeviceProperties( device, &props );
+      spdlog::info( "found {}", props.deviceName );
       m_platform.physicalDevice = device;
-      vkGetPhysicalDeviceMemoryProperties( device, &m_physicalDeviceMemoryProps );
-      vkGetPhysicalDeviceProperties( device, &m_physicalDeviceProps );
-      vkGetPhysicalDeviceFeatures( device, &m_physicalDeviceFeatures );
-      spdlog::info( "VkPhysicalDevice: {}", m_physicalDeviceProps.deviceName );
       break;
     }
   }
@@ -378,10 +345,10 @@ void VulkanDevice::pickPhysicalDevice()
 void VulkanDevice::createLogicalDevice()
 {
   // get the indices of the phisycal device we picked earlier
-  findQueueFamilies( m_platform.physicalDevice );
+  QueueFamilyIndices indices = findQueueFamilies( m_platform.physicalDevice );
 
   std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
-  std::set<uint32_t> uniqueQueueFamilies = { m_graphicsQueue.familyIndex, m_presentQueue.familyIndex };
+  std::set<uint32_t> uniqueQueueFamilies = { indices.graphicsFamily.value(), indices.presentFamily.value() };
 
   float queuePriority = 1.0f;
   for ( uint32_t queueFamily : uniqueQueueFamilies )
@@ -396,9 +363,13 @@ void VulkanDevice::createLogicalDevice()
 
   // specify the features
   VkPhysicalDeviceFeatures deviceFeatures{};
+  VkPhysicalDeviceDynamicRenderingFeatures dynamicRendering{};
+  dynamicRendering.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;
+  dynamicRendering.dynamicRendering = VK_TRUE;
 
   VkDeviceCreateInfo createInfo{};
   createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+  createInfo.pNext = &dynamicRendering;
   createInfo.queueCreateInfoCount = queueCreateInfos.size();
   createInfo.pQueueCreateInfos = queueCreateInfos.data();
   createInfo.pEnabledFeatures = &deviceFeatures;
@@ -422,7 +393,11 @@ void VulkanDevice::createLogicalDevice()
     throw std::runtime_error( "could not create logical device" );
   }
 
-  vkGetDeviceQueue( m_platform.device, m_graphicsQueue.familyIndex, 0, &m_graphicsQueue.handle );
-  vkGetDeviceQueue( m_platform.device, m_presentQueue.familyIndex, 0, &m_presentQueue.handle );
-  spdlog::info( "Created logical device" );
+  vkGetDeviceQueue( m_platform.device, indices.graphicsFamily.value(), 0, &m_graphicsQueue.handle );
+  vkGetDeviceQueue( m_platform.device, indices.presentFamily.value(), 0, &m_presentQueue.handle );
+}
+
+auto VulkanDevice::getInstance() -> VkInstance&
+{
+  return m_platform.instance;
 }
