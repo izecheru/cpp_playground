@@ -31,24 +31,46 @@ public:
   explicit VulkanSwapchain( VulkanDevice* vulkanDevice, SDL_Window* wnd );
   ~VulkanSwapchain();
 
+  /**
+   * @brief Get the command buffer at m_currentFrame index
+   * @return A VkCommandBuffer to record commands to
+   */
   auto getCurrentCommandBuffer() -> VkCommandBuffer&;
 
   void onUpdate();
+
+  /**
+   * @brief Destroy and initialize the swapchain again
+   */
   void recreateSwapchain();
 
+  /**
+   * @brief Present swapchain image to the surface
+   */
   void presentFrame();
+
   bool beginRendering();
   void endRendering();
 
   auto getSwapchainFormat() -> VkFormat&;
 
 private:
+  void setupViewport( VkCommandBuffer& cmd );
+  void setupScissors( VkCommandBuffer& cmd );
+
   void destroy();
+
+  /**
+   * @brief Submit command buffer to graphics queue
+   */
+  void submit();
+
   void createSwapchain();
   void createImageViews();
   void createCommandPool();
   void createCommandBuffers();
   void createSyncObjects();
+
   auto chooseSwapExtent( const VkSurfaceCapabilitiesKHR& capabilities ) -> VkExtent2D;
   auto chooseSwapPresentMode( const std::vector<VkPresentModeKHR>& availablePresentModes ) -> VkPresentModeKHR;
   auto chooseSwapSurfaceFormat( const std::vector<VkSurfaceFormatKHR>& availableFormats ) -> VkSurfaceFormatKHR;

@@ -32,8 +32,8 @@ int main()
     static bool running = true;
     while ( running )
     {
-
       SDL_Event e;
+      static bool rendering = true;
       while ( SDL_PollEvent( &e ) )
       {
         ImGui_ImplSDL2_ProcessEvent( &e );
@@ -43,20 +43,18 @@ int main()
           running = false;
           break;
         }
-      }
 
-      auto& cmd = swapchain->getCurrentCommandBuffer();
-      if ( swapchain->beginRendering() == true )
-      {
-        imgui->render( cmd );
+        swapchain->beginRendering();
+        imgui->render( swapchain->getCurrentCommandBuffer() );
         swapchain->endRendering();
+
         swapchain->presentFrame();
       }
     }
   }
   catch ( std::exception& e )
   {
-    std::cout << "something went wrong: exception-> " << e.what();
+    std::cout << "exception: " << e.what();
   }
   return 0;
 }
