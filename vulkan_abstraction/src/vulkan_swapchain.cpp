@@ -65,12 +65,13 @@ void VulkanSwapchain::onUpdate()
 
 void VulkanSwapchain::recreateSwapchain()
 {
-  vkDeviceWaitIdle( m_pDevice->getLogicalDevice() );
   while ( SDL_GetWindowFlags( m_window ) & SDL_WINDOW_MINIMIZED )
   {
     SDL_Event e;
     SDL_WaitEvent( &e );
   }
+
+  vkDeviceWaitIdle( m_pDevice->getLogicalDevice() );
 
   destroy();
   createSwapchain();

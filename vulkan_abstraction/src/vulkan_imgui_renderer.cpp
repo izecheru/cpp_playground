@@ -33,14 +33,22 @@ void VulkanImguiRenderer::end()
   ImGui::Render();
 }
 
-void VulkanImguiRenderer::render( VkCommandBuffer& buffer )
+void VulkanImguiRenderer::render()
 {
   begin();
+
+  // TODO iterate through the windows and draw them here
+  auto mouse = ImGui::GetMousePos();
   ImGui::Begin( "test" );
-  ImGui::Text( "test" );
+  auto window = ImGui::GetWindowPos();
+  ImGui::Text( "Mouse pos %.2f %.2f", mouse.x, mouse.y );
+  ImGui::Text( "Window pos %.2f %.2f", window.x, window.y );
   ImGui::End();
   end();
+}
 
+void VulkanImguiRenderer::present( VkCommandBuffer& buffer )
+{
   auto drawData = ImGui::GetDrawData();
   const bool isMinimized = ( drawData->DisplaySize.x <= 0.0f || drawData->DisplaySize.y <= 0.0f );
 
@@ -70,7 +78,7 @@ void VulkanImguiRenderer::initImgui( SDL_Window* wnd, VulkanDevice* device, Vulk
 
   if ( vkCreateDescriptorPool( device->getLogicalDevice(), &poolInfo, nullptr, &m_descriptorPool ) != VK_SUCCESS )
   {
-    throw std::runtime_error( "failed to create descriptor pool!" );
+    throw std::runtime_error( "failed to create imgui descriptor pool!" );
   }
 
   IMGUI_CHECKVERSION();
@@ -90,15 +98,17 @@ void VulkanImguiRenderer::initImgui( SDL_Window* wnd, VulkanDevice* device, Vulk
   init_info.QueueFamily = device->getGraphicsQueue().familyIndex;
   init_info.Queue = device->getGraphicsQueue().handle;
   init_info.DescriptorPool = m_descriptorPool;
+
+  // TODO get this from swapchain
   init_info.MinImageCount = 2;
   init_info.ImageCount = 3;
+
   init_info.UseDynamicRendering = true;
   init_info.PipelineInfoMain.PipelineRenderingCreateInfo = { .sType =
                                                                VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO };
 
   init_info.PipelineInfoMain.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
   init_info.PipelineInfoMain.PipelineRenderingCreateInfo.pColorAttachmentFormats = &swapchain->getSwapchainFormat();
-  // init_info.PipelineInfoMain.PipelineRenderingCreateInfo.depthAttachmentFormat = findDepthFormat();
 
   ImGui_ImplVulkan_Init( &init_info );
 }

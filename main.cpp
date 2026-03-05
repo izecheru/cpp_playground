@@ -44,11 +44,15 @@ int main()
           break;
         }
 
-        swapchain->beginRendering();
-        imgui->render( swapchain->getCurrentCommandBuffer() );
-        swapchain->endRendering();
+        {
+          auto& cmd = swapchain->getCurrentCommandBuffer();
+          swapchain->beginRendering();
+          imgui->render();
+          imgui->present( cmd );
+          swapchain->endRendering();
 
-        swapchain->presentFrame();
+          swapchain->presentFrame();
+        }
       }
     }
   }
