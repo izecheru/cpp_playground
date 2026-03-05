@@ -7,21 +7,51 @@
 #include "vulkan_abstraction/vulkan_swapchain.hpp"
 
 VulkanImguiRenderer::VulkanImguiRenderer( SDL_Window* wnd, VulkanDevice* device, VulkanSwapchain* swapchain )
+    : m_device{ device }
 {
   initImgui( wnd, device, swapchain );
 }
 
-void VulkanImguiRenderer::render( VkCommandBuffer buffer )
+VulkanImguiRenderer::~VulkanImguiRenderer()
+{
+  vkDeviceWaitIdle( m_device->getLogicalDevice() );
+  ImGui_ImplVulkan_Shutdown();
+  ImGui_ImplSDL2_Shutdown();
+  ImGui::DestroyContext();
+  vkDestroyDescriptorPool( m_device->getLogicalDevice(), m_descriptorPool, nullptr );
+}
+
+void VulkanImguiRenderer::begin()
 {
   ImGui_ImplVulkan_NewFrame();
   ImGui_ImplSDL2_NewFrame();
   ImGui::NewFrame();
+}
 
+void VulkanImguiRenderer::end()
+{
+  ImGui::Render();
+}
+
+void VulkanImguiRenderer::render( VkCommandBuffer& buffer )
+{
+  begin();
   ImGui::Begin( "test" );
   ImGui::Text( "test" );
   ImGui::End();
-  ImGui::Render();
-  ImGui_ImplVulkan_RenderDrawData( ImGui::GetDrawData(), buffer );
+  end();
+
+  auto drawData = ImGui::GetDrawData();
+  const bool isMinimized = ( drawData->DisplaySize.x <= 0.0f || drawData->DisplaySize.y <= 0.0f );
+
+  if ( !isMinimized )
+    ImGui_ImplVulkan_RenderDrawData( ImGui::GetDrawData(), buffer, NULL );
+
+  if ( ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable )
+  {
+    ImGui::UpdatePlatformWindows();
+    ImGui::RenderPlatformWindowsDefault();
+  }
 }
 
 void VulkanImguiRenderer::initImgui( SDL_Window* wnd, VulkanDevice* device, VulkanSwapchain* swapchain )
@@ -29,16 +59,16 @@ void VulkanImguiRenderer::initImgui( SDL_Window* wnd, VulkanDevice* device, Vulk
   VkDescriptorPoolSize pool_sizes[] = {
     { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, IMGUI_IMPL_VULKAN_MINIMUM_IMAGE_SAMPLER_POOL_SIZE },
   };
-  VkDescriptorPoolCreateInfo pool_info = {};
-  pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-  pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-  pool_info.maxSets = 0;
+  VkDescriptorPoolCreateInfo poolInfo = {};
+  poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+  poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+  poolInfo.maxSets = 0;
   for ( VkDescriptorPoolSize& pool_size : pool_sizes )
-    pool_info.maxSets += pool_size.descriptorCount;
-  pool_info.poolSizeCount = (uint32_t)IM_COUNTOF( pool_sizes );
-  pool_info.pPoolSizes = pool_sizes;
+    poolInfo.maxSets += pool_size.descriptorCount;
+  poolInfo.poolSizeCount = (uint32_t)IM_COUNTOF( pool_sizes );
+  poolInfo.pPoolSizes = pool_sizes;
 
-  if ( vkCreateDescriptorPool( device->getLogicalDevice(), &pool_info, nullptr, &m_descriptorPool ) != VK_SUCCESS )
+  if ( vkCreateDescriptorPool( device->getLogicalDevice(), &poolInfo, nullptr, &m_descriptorPool ) != VK_SUCCESS )
   {
     throw std::runtime_error( "failed to create descriptor pool!" );
   }
@@ -61,7 +91,7 @@ void VulkanImguiRenderer::initImgui( SDL_Window* wnd, VulkanDevice* device, Vulk
   init_info.Queue = device->getGraphicsQueue().handle;
   init_info.DescriptorPool = m_descriptorPool;
   init_info.MinImageCount = 2;
-  init_info.ImageCount = 2;
+  init_info.ImageCount = 3;
   init_info.UseDynamicRendering = true;
   init_info.PipelineInfoMain.PipelineRenderingCreateInfo = { .sType =
                                                                VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO };

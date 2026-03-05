@@ -1,6 +1,8 @@
 ﻿#define SDL_MAIN_HANDLED
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_vulkan.h>
+#include <imgui.h>
+#include <imgui_impl_sdl2.h>
 #include <iostream>
 #include "vulkan_abstraction/vulkan_device.hpp"
 #include "vulkan_abstraction/vulkan_imgui_renderer.hpp"
@@ -23,18 +25,33 @@ int main()
     auto window =
       SDL_CreateWindow( "kogayonon", 100, 100, 800, 800, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_SHOWN );
 
-    VulkanDevice device{ window };
-    VulkanSwapchain swapchain{ &device, window };
-    VulkanImguiRenderer imgui{ window, &device, &swapchain };
+    auto device = std::make_shared<VulkanDevice>( window );
+    auto swapchain = std::make_shared<VulkanSwapchain>( device.get(), window );
+    auto imgui = std::make_shared<VulkanImguiRenderer>( window, device.get(), swapchain.get() );
 
-    while ( true )
+    static bool running = true;
+    while ( running )
     {
-      swapchain.beginRendering();
-      auto cmd = swapchain.getCurrentCommandBuffer();
-      imgui.render( cmd );
-      swapchain.endRendering( cmd );
-      swapchain.presentFrame();
-      swapchain.onUpdate();
+
+      SDL_Event e;
+      while ( SDL_PollEvent( &e ) )
+      {
+        ImGui_ImplSDL2_ProcessEvent( &e );
+        switch ( e.type )
+        {
+        case SDL_QUIT:
+          running = false;
+          break;
+        }
+      }
+
+      auto& cmd = swapchain->getCurrentCommandBuffer();
+      if ( swapchain->beginRendering() == true )
+      {
+        imgui->render( cmd );
+        swapchain->endRendering();
+        swapchain->presentFrame();
+      }
     }
   }
   catch ( std::exception& e )

@@ -65,6 +65,18 @@ void VulkanSwapchain::onUpdate()
 
 void VulkanSwapchain::recreateSwapchain()
 {
+  int width = 0, height = 0;
+  SDL_GetWindowSize( m_window, &width, &height );
+  if ( width == 0 || height == 0 )
+    return;
+
+  destroy();
+
+  createSwapchain();
+  createImageViews();
+  createCommandPool();
+  createCommandBuffers();
+  createSyncObjects();
 }
 
 void VulkanSwapchain::presentFrame()
@@ -79,39 +91,90 @@ void VulkanSwapchain::presentFrame()
 
   vkQueuePresentKHR( m_pDevice->getPresentQueue().handle, &presentInfo );
 
-  m_currentFrame = ( m_currentFrame + 1 ) % 2;
+  m_currentFrame = ( m_currentFrame + 1 ) % MAX_FRAMES_IN_FLIGHT;
 }
 
-void VulkanSwapchain::beginRendering()
+bool VulkanSwapchain::beginRendering()
 {
-  VkCommandBufferBeginInfo begin{};
-  begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-  vkBeginCommandBuffer( getCurrentCommandBuffer(), &begin );
+  auto& cmd = getCurrentCommandBuffer();
 
   vkWaitForFences(
     m_pDevice->getLogicalDevice(), 1, &m_swapchainImages.at( m_currentFrame ).inFlight, VK_TRUE, UINT64_MAX );
 
-  uint32_t imageIndex;
+  VkCommandBufferBeginInfo begin{};
+  begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  vkBeginCommandBuffer( cmd, &begin );
+
   auto result = vkAcquireNextImageKHR( m_pDevice->getLogicalDevice(),
                                        m_swapchain,
                                        UINT64_MAX,
                                        m_swapchainImages.at( m_currentFrame ).imageAvailable,
                                        VK_NULL_HANDLE,
-                                       &imageIndex );
+                                       &m_imageIndex );
 
   if ( result == VK_ERROR_OUT_OF_DATE_KHR )
   {
     recreateSwapchain();
-    return;
+    return false;
   }
   else if ( result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR )
   {
     throw std::runtime_error( "failed to acquire swap chain image!" );
   }
+
+  vkResetFences( m_pDevice->getLogicalDevice(), 1, &m_swapchainImages.at( m_currentFrame ).inFlight );
+
+  VkRenderingAttachmentInfo colorAttachment{ .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                                             .imageView = m_swapchainImages.at( m_imageIndex ).imageView,
+                                             .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                                             .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                                             .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+                                             .clearValue = { { 0.f, 0.f, 0.f, 1.f } } };
+
+  VkRenderingInfo renderingInfo{};
+  renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+  renderingInfo.renderArea = { { 0, 0 }, m_swapchainExtent };
+  renderingInfo.layerCount = 1;
+  renderingInfo.colorAttachmentCount = 1;
+  renderingInfo.pColorAttachments = &colorAttachment;
+  renderingInfo.pDepthAttachment = nullptr;
+
+  VkImageMemoryBarrier collorAttachmentBarrier{};
+  collorAttachmentBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  collorAttachmentBarrier.srcAccessMask = 0;
+  collorAttachmentBarrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  collorAttachmentBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  collorAttachmentBarrier.subresourceRange.levelCount = 1;
+  collorAttachmentBarrier.subresourceRange.layerCount = 1;
+
+  collorAttachmentBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  collorAttachmentBarrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  collorAttachmentBarrier.image = m_swapchainImages.at( m_imageIndex ).image;
+
+  vkCmdPipelineBarrier( cmd,
+                        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                        0,
+                        0,
+                        nullptr,
+                        0,
+                        nullptr,
+                        1,
+                        &collorAttachmentBarrier );
+
+  vkCmdBeginRendering( cmd, &renderingInfo );
+
+  VkViewport viewport{ 0, 0, (float)m_swapchainExtent.width, (float)m_swapchainExtent.height, 0.0f, 1.0f };
+  vkCmdSetViewport( cmd, 0, 1, &viewport );
+
+  VkRect2D scissor{ { 0, 0 }, m_swapchainExtent };
+  vkCmdSetScissor( cmd, 0, 1, &scissor );
+  return true;
 }
 
-void VulkanSwapchain::endRendering( VkCommandBuffer cmd )
+void VulkanSwapchain::endRendering()
 {
+  auto& cmd = getCurrentCommandBuffer();
   vkCmdEndRendering( cmd );
   VkImageMemoryBarrier swapchainToPresent{};
   swapchainToPresent.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -139,6 +202,25 @@ void VulkanSwapchain::endRendering( VkCommandBuffer cmd )
                         &swapchainToPresent );
 
   vkEndCommandBuffer( cmd );
+
+  VkSubmitInfo submitInfo{};
+  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+
+  VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
+  submitInfo.waitSemaphoreCount = 1;
+  submitInfo.pSignalSemaphores = &m_swapchainImages.at( m_imageIndex ).renderingFinished;
+  submitInfo.pWaitSemaphores = &m_swapchainImages.at( m_currentFrame ).imageAvailable;
+  submitInfo.pCommandBuffers = &m_commandBuffers.at( m_currentFrame );
+  submitInfo.pWaitDstStageMask = waitStages;
+  submitInfo.commandBufferCount = 1;
+  submitInfo.signalSemaphoreCount = 1;
+
+  if ( vkQueueSubmit(
+         m_pDevice->getGraphicsQueue().handle, 1, &submitInfo, m_swapchainImages.at( m_currentFrame ).inFlight ) !=
+       VK_SUCCESS )
+  {
+    throw std::runtime_error( "failed to submit draw command buffer!" );
+  }
 }
 
 auto VulkanSwapchain::getSwapchainFormat() -> VkFormat&
@@ -355,7 +437,7 @@ auto VulkanSwapchain::chooseSwapSurfaceFormat( const std::vector<VkSurfaceFormat
 {
   for ( const auto& availableFormat : availableFormats )
   {
-    if ( availableFormat.format == VK_FORMAT_B8G8R8A8_SRGB &&
+    if ( availableFormat.format == VK_FORMAT_B8G8R8A8_UNORM &&
          availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR )
     {
       return availableFormat;

@@ -2,7 +2,7 @@
 #include <vector>
 #include <vulkan/vulkan.h>
 
-#define MAX_FRAMES_IN_FLIGHT 2
+#define MAX_FRAMES_IN_FLIGHT 3
 
 struct VulkanDevice;
 struct QueueFamilyIndices;
@@ -15,7 +15,7 @@ struct SwapchainImage
 
   VkSemaphore imageAvailable{};
   VkSemaphore renderingFinished{};
-  VkFence inFlight{};
+  VkFence inFlight{ VK_NULL_HANDLE };
 };
 
 struct SwapchainSupportDetails
@@ -35,9 +35,11 @@ public:
 
   void onUpdate();
   void recreateSwapchain();
+
   void presentFrame();
-  void beginRendering();
-  void endRendering( VkCommandBuffer cmd );
+  bool beginRendering();
+  void endRendering();
+
   auto getSwapchainFormat() -> VkFormat&;
 
 private:
@@ -70,4 +72,6 @@ private:
 
   std::vector<VkCommandBuffer> m_commandBuffers;
   VkCommandPool m_commandPool;
+
+  bool m_rendering{ true };
 };
