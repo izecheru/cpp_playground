@@ -13,13 +13,13 @@ VulkanRenderer::VulkanRenderer( SDL_Window* wnd )
 
 void VulkanRenderer::beginRendering()
 {
-  auto currentFrame = m_swapchain->getCurrentSwapchainImage();
+  //auto currentFrame = m_swapchain->getCurrentSwapchainImage();
 
-  vkWaitForFences( m_device->getLogicalDevice(), 1, &currentFrame.inFlight, VK_TRUE, UINT64_MAX );
+  //vkWaitForFences( m_device->getLogicalDevice(), 1, &currentFrame.inFlight, VK_TRUE, UINT64_MAX );
 
-  m_swapchain->getNextImageIndex();
+  //m_swapchain->getNextImageIndex();
 
-  vkResetFences( m_device->getLogicalDevice(), 1, &currentFrame.inFlight );
+  //vkResetFences( m_device->getLogicalDevice(), 1, &currentFrame.inFlight );
 }
 
 void VulkanRenderer::endRendering()

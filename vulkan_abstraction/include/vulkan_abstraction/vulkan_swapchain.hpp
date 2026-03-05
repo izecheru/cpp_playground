@@ -2,6 +2,8 @@
 #include <vector>
 #include <vulkan/vulkan.h>
 
+#define MAX_FRAMES_IN_FLIGHT 2
+
 struct VulkanDevice;
 struct QueueFamilyIndices;
 struct SDL_Window;
@@ -31,10 +33,12 @@ public:
 
   auto getCurrentCommandBuffer() -> VkCommandBuffer&;
 
+  void onUpdate();
   void recreateSwapchain();
   void presentFrame();
   void beginRendering();
-  void endRendering();
+  void endRendering( VkCommandBuffer cmd );
+  auto getSwapchainFormat() -> VkFormat&;
 
 private:
   void destroy();

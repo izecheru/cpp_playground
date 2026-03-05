@@ -1,11 +1,11 @@
 ﻿set(Target_sources
 "include/vulkan_abstraction/vulkan_device.hpp"
 "include/vulkan_abstraction/vulkan_swapchain.hpp"
-"include/vulkan_abstraction/vulkan_renderer.hpp"
+#"include/vulkan_abstraction/vulkan_renderer.hpp"
 "include/vulkan_abstraction/vulkan_imgui_renderer.hpp"
 
 "src/vulkan_device.cpp"
-"src/vulkan_renderer.cpp"
+#"src/vulkan_renderer.cpp"
 "src/vulkan_swapchain.cpp"
 "src/vulkan_imgui_renderer.cpp"
 )

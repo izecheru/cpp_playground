@@ -11,6 +11,8 @@ public:
   explicit VulkanImguiRenderer( SDL_Window* wnd, VulkanDevice* device, VulkanSwapchain* swapchain );
   ~VulkanImguiRenderer() = default;
 
+  void render( VkCommandBuffer buffer );
+
   void initImgui( SDL_Window* wnd, VulkanDevice* device, VulkanSwapchain* swapchain );
 
 private:

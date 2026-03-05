@@ -3,6 +3,7 @@
 #include <SDL2/SDL_vulkan.h>
 #include <iostream>
 #include "vulkan_abstraction/vulkan_device.hpp"
+#include "vulkan_abstraction/vulkan_imgui_renderer.hpp"
 #include "vulkan_abstraction/vulkan_swapchain.hpp"
 
 int main()
@@ -24,6 +25,17 @@ int main()
 
     VulkanDevice device{ window };
     VulkanSwapchain swapchain{ &device, window };
+    VulkanImguiRenderer imgui{ window, &device, &swapchain };
+
+    while ( true )
+    {
+      swapchain.beginRendering();
+      auto cmd = swapchain.getCurrentCommandBuffer();
+      imgui.render( cmd );
+      swapchain.endRendering( cmd );
+      swapchain.presentFrame();
+      swapchain.onUpdate();
+    }
   }
   catch ( std::exception& e )
   {

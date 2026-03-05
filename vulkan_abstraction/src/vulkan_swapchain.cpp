@@ -1,12 +1,10 @@
-#include "vulkan_swapchain.hpp"
+#include "vulkan_abstraction/vulkan_swapchain.hpp"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_vulkan.h>
 #include <algorithm>
 #include <spdlog/spdlog.h>
 #include <stdexcept>
 #include "vulkan_abstraction/vulkan_device.hpp"
-#include "vulkan_abstraction/vulkan_swapchain.hpp"
-#include "vulkan_swapchain.hpp"
 
 auto VulkanSwapchain::querySwapchainSupport() -> SwapchainSupportDetails
 {
@@ -60,6 +58,15 @@ auto VulkanSwapchain::getCurrentCommandBuffer() -> VkCommandBuffer&
   return m_commandBuffers.at( m_currentFrame );
 }
 
+void VulkanSwapchain::onUpdate()
+{
+  m_currentFrame = ( m_currentFrame + 1 ) % MAX_FRAMES_IN_FLIGHT;
+}
+
+void VulkanSwapchain::recreateSwapchain()
+{
+}
+
 void VulkanSwapchain::presentFrame()
 {
   VkPresentInfoKHR presentInfo{};
@@ -77,6 +84,10 @@ void VulkanSwapchain::presentFrame()
 
 void VulkanSwapchain::beginRendering()
 {
+  VkCommandBufferBeginInfo begin{};
+  begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  vkBeginCommandBuffer( getCurrentCommandBuffer(), &begin );
+
   vkWaitForFences(
     m_pDevice->getLogicalDevice(), 1, &m_swapchainImages.at( m_currentFrame ).inFlight, VK_TRUE, UINT64_MAX );
 
@@ -99,8 +110,40 @@ void VulkanSwapchain::beginRendering()
   }
 }
 
-void VulkanSwapchain::endRendering()
+void VulkanSwapchain::endRendering( VkCommandBuffer cmd )
 {
+  vkCmdEndRendering( cmd );
+  VkImageMemoryBarrier swapchainToPresent{};
+  swapchainToPresent.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  swapchainToPresent.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  swapchainToPresent.dstAccessMask = 0;
+  swapchainToPresent.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  swapchainToPresent.subresourceRange.baseMipLevel = 0;
+  swapchainToPresent.subresourceRange.levelCount = 1;
+  swapchainToPresent.subresourceRange.baseArrayLayer = 0;
+  swapchainToPresent.subresourceRange.layerCount = 1;
+
+  swapchainToPresent.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  swapchainToPresent.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+  swapchainToPresent.image = m_swapchainImages.at( m_imageIndex ).image;
+
+  vkCmdPipelineBarrier( cmd,
+                        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                        VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                        0,
+                        0,
+                        nullptr,
+                        0,
+                        nullptr,
+                        1,
+                        &swapchainToPresent );
+
+  vkEndCommandBuffer( cmd );
+}
+
+auto VulkanSwapchain::getSwapchainFormat() -> VkFormat&
+{
+  return m_swapchainFormat;
 }
 
 void VulkanSwapchain::destroy()

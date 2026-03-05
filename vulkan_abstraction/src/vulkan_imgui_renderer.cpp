@@ -11,6 +11,19 @@ VulkanImguiRenderer::VulkanImguiRenderer( SDL_Window* wnd, VulkanDevice* device,
   initImgui( wnd, device, swapchain );
 }
 
+void VulkanImguiRenderer::render( VkCommandBuffer buffer )
+{
+  ImGui_ImplVulkan_NewFrame();
+  ImGui_ImplSDL2_NewFrame();
+  ImGui::NewFrame();
+
+  ImGui::Begin( "test" );
+  ImGui::Text( "test" );
+  ImGui::End();
+  ImGui::Render();
+  ImGui_ImplVulkan_RenderDrawData( ImGui::GetDrawData(), buffer );
+}
+
 void VulkanImguiRenderer::initImgui( SDL_Window* wnd, VulkanDevice* device, VulkanSwapchain* swapchain )
 {
   VkDescriptorPoolSize pool_sizes[] = {
@@ -54,8 +67,7 @@ void VulkanImguiRenderer::initImgui( SDL_Window* wnd, VulkanDevice* device, Vulk
                                                                VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO };
 
   init_info.PipelineInfoMain.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
-  init_info.PipelineInfoMain.PipelineRenderingCreateInfo.pColorAttachmentFormats =
-    &swapchain->getSwapchainImageFormat();
+  init_info.PipelineInfoMain.PipelineRenderingCreateInfo.pColorAttachmentFormats = &swapchain->getSwapchainFormat();
   // init_info.PipelineInfoMain.PipelineRenderingCreateInfo.depthAttachmentFormat = findDepthFormat();
 
   ImGui_ImplVulkan_Init( &init_info );
