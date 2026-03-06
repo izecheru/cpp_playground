@@ -65,6 +65,9 @@ void VulkanSwapchain::onUpdate()
 
 void VulkanSwapchain::recreateSwapchain()
 {
+  // this makes the app wait for as long as the window is minimized
+  // and right as we resize the window or bring it to focus the swapchain
+  // gets created
   while ( SDL_GetWindowFlags( m_window ) & SDL_WINDOW_MINIMIZED )
   {
     SDL_Event e;
@@ -141,24 +144,29 @@ bool VulkanSwapchain::beginRendering()
                                              .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
                                              .clearValue = { { 0.f, 0.f, 0.f, 1.f } } };
 
-  VkRenderingInfo renderingInfo{};
-  renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
-  renderingInfo.renderArea = { { 0, 0 }, m_swapchainExtent };
-  renderingInfo.layerCount = 1;
-  renderingInfo.colorAttachmentCount = 1;
-  renderingInfo.pColorAttachments = &colorAttachment;
-  renderingInfo.pDepthAttachment = nullptr;
+  VkRenderingInfo renderingInfo{
+    .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+    .renderArea = { { 0, 0 }, m_swapchainExtent },
+    .layerCount = 1,
+    .colorAttachmentCount = 1,
+    .pColorAttachments = &colorAttachment,
+    .pDepthAttachment = nullptr,
+  };
 
-  VkImageMemoryBarrier collorAttachmentBarrier{};
-  collorAttachmentBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-  collorAttachmentBarrier.srcAccessMask = 0;
-  collorAttachmentBarrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-  collorAttachmentBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-  collorAttachmentBarrier.subresourceRange.levelCount = 1;
-  collorAttachmentBarrier.subresourceRange.layerCount = 1;
-  collorAttachmentBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-  collorAttachmentBarrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-  collorAttachmentBarrier.image = m_swapchainImages.at( m_imageIndex ).image;
+  VkImageMemoryBarrier collorAttachmentBarrier{
+    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+    .srcAccessMask = 0,
+    .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+    .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+    .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+    .image = m_swapchainImages.at( m_imageIndex ).image,
+    .subresourceRange =
+      {
+        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+        .levelCount = 1,
+        .layerCount = 1,
+      },
+  };
 
   vkCmdPipelineBarrier( cmd,
                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,

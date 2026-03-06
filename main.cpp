@@ -24,6 +24,7 @@ int main()
 
     auto window =
       SDL_CreateWindow( "kogayonon", 100, 100, 800, 800, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_SHOWN );
+    SDL_SetWindowMinimumSize( window, 400, 400 );
 
     auto device = std::make_shared<VulkanDevice>( window );
     auto swapchain = std::make_shared<VulkanSwapchain>( device.get(), window );
