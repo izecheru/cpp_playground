@@ -37,12 +37,15 @@ void VulkanImguiRenderer::render()
 {
   begin();
 
-  // TODO iterate through the windows and draw them here
   auto mouse = ImGui::GetMousePos();
   ImGui::Begin( "test" );
   auto window = ImGui::GetWindowPos();
   ImGui::Text( "Mouse pos %.2f %.2f", mouse.x, mouse.y );
   ImGui::Text( "Window pos %.2f %.2f", window.x, window.y );
+  ImGui::End();
+
+  ImGui::Begin( "test 2" );
+  ImGui::TextUnformatted( "this is just some unformatted text" );
   ImGui::End();
   end();
 }
@@ -64,17 +67,20 @@ void VulkanImguiRenderer::present( VkCommandBuffer& buffer )
 
 void VulkanImguiRenderer::initImgui( SDL_Window* wnd, VulkanDevice* device, VulkanSwapchain* swapchain )
 {
-  VkDescriptorPoolSize pool_sizes[] = {
+  VkDescriptorPoolSize poolSizes[] = {
     { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, IMGUI_IMPL_VULKAN_MINIMUM_IMAGE_SAMPLER_POOL_SIZE },
   };
+
   VkDescriptorPoolCreateInfo poolInfo = {};
   poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
   poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
   poolInfo.maxSets = 0;
-  for ( VkDescriptorPoolSize& pool_size : pool_sizes )
-    poolInfo.maxSets += pool_size.descriptorCount;
-  poolInfo.poolSizeCount = (uint32_t)IM_COUNTOF( pool_sizes );
-  poolInfo.pPoolSizes = pool_sizes;
+
+  for ( VkDescriptorPoolSize& poolSize : poolSizes )
+    poolInfo.maxSets += poolSize.descriptorCount;
+
+  poolInfo.poolSizeCount = (uint32_t)IM_COUNTOF( poolSizes );
+  poolInfo.pPoolSizes = poolSizes;
 
   if ( vkCreateDescriptorPool( device->getLogicalDevice(), &poolInfo, nullptr, &m_descriptorPool ) != VK_SUCCESS )
   {
@@ -91,24 +97,23 @@ void VulkanImguiRenderer::initImgui( SDL_Window* wnd, VulkanDevice* device, Vulk
 
   ImGui_ImplSDL2_InitForVulkan( wnd );
 
-  ImGui_ImplVulkan_InitInfo init_info = {};
-  init_info.Instance = device->getInstance();
-  init_info.PhysicalDevice = device->getPhysicalDevice();
-  init_info.Device = device->getLogicalDevice();
-  init_info.QueueFamily = device->getGraphicsQueue().familyIndex;
-  init_info.Queue = device->getGraphicsQueue().handle;
-  init_info.DescriptorPool = m_descriptorPool;
+  ImGui_ImplVulkan_InitInfo initInfo = {};
+  initInfo.Instance = device->getInstance();
+  initInfo.PhysicalDevice = device->getPhysicalDevice();
+  initInfo.Device = device->getLogicalDevice();
+  initInfo.QueueFamily = device->getGraphicsQueue().familyIndex;
+  initInfo.Queue = device->getGraphicsQueue().handle;
+  initInfo.DescriptorPool = m_descriptorPool;
 
   // TODO get this from swapchain
-  init_info.MinImageCount = 2;
-  init_info.ImageCount = 3;
+  initInfo.MinImageCount = 2;
+  initInfo.ImageCount = 3;
 
-  init_info.UseDynamicRendering = true;
-  init_info.PipelineInfoMain.PipelineRenderingCreateInfo = { .sType =
-                                                               VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO };
+  initInfo.UseDynamicRendering = true;
+  initInfo.PipelineInfoMain.PipelineRenderingCreateInfo = { .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO };
 
-  init_info.PipelineInfoMain.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
-  init_info.PipelineInfoMain.PipelineRenderingCreateInfo.pColorAttachmentFormats = &swapchain->getSwapchainFormat();
+  initInfo.PipelineInfoMain.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
+  initInfo.PipelineInfoMain.PipelineRenderingCreateInfo.pColorAttachmentFormats = &swapchain->getSwapchainFormat();
 
-  ImGui_ImplVulkan_Init( &init_info );
+  ImGui_ImplVulkan_Init( &initInfo );
 }

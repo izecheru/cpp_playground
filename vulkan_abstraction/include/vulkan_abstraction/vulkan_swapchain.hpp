@@ -95,5 +95,11 @@ private:
   std::vector<VkCommandBuffer> m_commandBuffers;
   VkCommandPool m_commandPool;
 
+  /**
+   * @brief I use this just for convenience sake, it's not appealing to do auto& cmd = getCurrentCommandBuffer()
+   * in each function I need
+   */
+  VkCommandBuffer* m_currentCmdBuffer;
+
   bool m_rendering{ true };
 };

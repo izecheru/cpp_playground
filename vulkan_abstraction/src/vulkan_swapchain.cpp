@@ -86,13 +86,14 @@ void VulkanSwapchain::recreateSwapchain()
 
 void VulkanSwapchain::presentFrame()
 {
-  VkPresentInfoKHR presentInfo{};
-  presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-  presentInfo.waitSemaphoreCount = 1;
-  presentInfo.pWaitSemaphores = &m_swapchainImages.at( m_imageIndex ).renderingFinished;
-  presentInfo.swapchainCount = 1;
-  presentInfo.pSwapchains = &m_swapchain;
-  presentInfo.pImageIndices = &m_imageIndex;
+  VkPresentInfoKHR presentInfo{
+    .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+    .waitSemaphoreCount = 1,
+    .pWaitSemaphores = &m_swapchainImages.at( m_imageIndex ).renderingFinished,
+    .swapchainCount = 1,
+    .pSwapchains = &m_swapchain,
+    .pImageIndices = &m_imageIndex,
+  };
 
   auto result = vkQueuePresentKHR( m_pDevice->getPresentQueue().handle, &presentInfo );
   if ( result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR )
@@ -109,14 +110,14 @@ void VulkanSwapchain::presentFrame()
 
 bool VulkanSwapchain::beginRendering()
 {
-  auto& cmd = getCurrentCommandBuffer();
+  m_currentCmdBuffer = &getCurrentCommandBuffer();
 
   vkWaitForFences(
     m_pDevice->getLogicalDevice(), 1, &m_swapchainImages.at( m_currentFrame ).inFlight, VK_TRUE, UINT64_MAX );
 
-  VkCommandBufferBeginInfo begin{};
-  begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-  vkBeginCommandBuffer( cmd, &begin );
+  VkCommandBufferBeginInfo begin{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+
+  vkBeginCommandBuffer( *m_currentCmdBuffer, &begin );
 
   auto result = vkAcquireNextImageKHR( m_pDevice->getLogicalDevice(),
                                        m_swapchain,
@@ -168,7 +169,7 @@ bool VulkanSwapchain::beginRendering()
       },
   };
 
-  vkCmdPipelineBarrier( cmd,
+  vkCmdPipelineBarrier( *m_currentCmdBuffer,
                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
                         0,
@@ -179,18 +180,17 @@ bool VulkanSwapchain::beginRendering()
                         1,
                         &collorAttachmentBarrier );
 
-  vkCmdBeginRendering( cmd, &renderingInfo );
+  vkCmdBeginRendering( *m_currentCmdBuffer, &renderingInfo );
 
-  setupViewport( cmd );
-  setupScissors( cmd );
+  setupViewport( *m_currentCmdBuffer );
+  setupScissors( *m_currentCmdBuffer );
 
   return true;
 }
 
 void VulkanSwapchain::endRendering()
 {
-  auto& cmd = getCurrentCommandBuffer();
-  vkCmdEndRendering( cmd );
+  vkCmdEndRendering( *m_currentCmdBuffer );
   VkImageMemoryBarrier swapchainToPresent{};
   swapchainToPresent.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
   swapchainToPresent.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
@@ -205,7 +205,7 @@ void VulkanSwapchain::endRendering()
   swapchainToPresent.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
   swapchainToPresent.image = m_swapchainImages.at( m_imageIndex ).image;
 
-  vkCmdPipelineBarrier( cmd,
+  vkCmdPipelineBarrier( *m_currentCmdBuffer,
                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
                         0,
@@ -216,7 +216,7 @@ void VulkanSwapchain::endRendering()
                         1,
                         &swapchainToPresent );
 
-  vkEndCommandBuffer( cmd );
+  vkEndCommandBuffer( *m_currentCmdBuffer );
 
   submit();
 }

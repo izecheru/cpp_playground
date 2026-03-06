@@ -13,9 +13,10 @@ public:
 
   void render();
   void present( VkCommandBuffer& buffer );
-  void initImgui( SDL_Window* wnd, VulkanDevice* device, VulkanSwapchain* swapchain );
 
 private:
+  void initImgui( SDL_Window* wnd, VulkanDevice* device, VulkanSwapchain* swapchain );
+
   void begin();
   void end();
 
